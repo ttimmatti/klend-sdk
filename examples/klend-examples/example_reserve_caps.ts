@@ -7,24 +7,28 @@ import { loadReserveData } from '../utils/helpers';
  * Get reserve supply/borrow caps
  */
 export async function getReserveCaps(args: ReserveArgs) {
-  const { reserve, currentSlot } = await loadReserveData(args);
+  const { reserve } = await loadReserveData(args);
+  const currentTimestamp = Math.floor(Date.now() / 1000);
 
   return {
-    dailySupplyCapacity: reserve.getDepositWithdrawalCapCapacity(),
-    dailyBorrowCapacity: reserve.getDebtWithdrawalCapCapacity(),
-    currentSupplyCapacity: reserve.getDepositWithdrawalCapCurrent(currentSlot),
-    currentBorrowCapacity: reserve.getDebtWithdrawalCapCurrent(currentSlot),
+    supplyCapacity: reserve.getDepositWithdrawalCapCapacity(),
+    borrowCapacity: reserve.getDebtWithdrawalCapCapacity(),
+    currentSupplyCapacity: reserve.getDepositWithdrawalCapCurrent(currentTimestamp),
+    currentBorrowCapacity: reserve.getDebtWithdrawalCapCurrent(currentTimestamp),
   };
 }
 (async () => {
   const c = getConnectionPool();
   console.log(`fetching data for market ${MAIN_MARKET.toString()} token ${PYUSD_MINT.toString()}`);
-  const { currentSupplyCapacity, currentBorrowCapacity, dailySupplyCapacity, dailyBorrowCapacity } =
-    await getReserveCaps({ rpc: c.rpc, marketPubkey: MAIN_MARKET, mintPubkey: PYUSD_MINT });
-  console.log(`current supply capacity:`, currentSupplyCapacity.toNumber());
+  const { currentSupplyCapacity, currentBorrowCapacity, supplyCapacity, borrowCapacity } = await getReserveCaps({
+    rpc: c.rpc,
+    marketPubkey: MAIN_MARKET,
+    mintPubkey: PYUSD_MINT,
+  });
+  console.log('current supply capacity:', currentSupplyCapacity.toNumber());
   console.log('current borrow capacity:', currentBorrowCapacity.toNumber());
-  console.log('daily supply capacity:', dailySupplyCapacity.toNumber());
-  console.log('daily borrow capacity:', dailyBorrowCapacity.toNumber());
+  console.log('supply capacity:', supplyCapacity.toNumber());
+  console.log('borrow capacity:', borrowCapacity.toNumber());
 })().catch(async (e) => {
   console.error(e);
 });

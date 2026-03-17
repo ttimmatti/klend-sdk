@@ -40,6 +40,8 @@ export type AddAssetToMarketParams = {
   adminLiquiditySource: Address;
   marketAddress: Address;
   assetConfig: AssetConfig;
+  reserveKeypair: TransactionSigner;
+  globalAdminSigner?: TransactionSigner;
 };
 
 export interface AssetConfig {

@@ -236,6 +236,26 @@ export class ConfigUpdater<M extends BorshEnum, C> {
   }
 }
 
+/**
+ * A ConfigUpdater wrapper that returns updates in priority order from `encodeAllUpdates`.
+ */
+export class PriorityOrderedConfigUpdater<M extends BorshEnum, C> {
+  private readonly updater: ConfigUpdater<M, C>;
+
+  constructor(updater: ConfigUpdater<M, C>) {
+    this.updater = updater;
+  }
+
+  encodeAllUpdates(
+    currentConfig: C | undefined,
+    newConfig: C,
+    priorityOf: (mode: M) => number
+  ): EncodedConfigUpdate<M>[] {
+    const updates = this.updater.encodeAllUpdates(currentConfig, newConfig);
+    return [...updates].sort((left, right) => priorityOf(left.mode) - priorityOf(right.mode));
+  }
+}
+
 /** Reserve config fields have cross-dependencies with each other.
  *
  * When several fields must be updated at once, this will ensure

@@ -1468,7 +1468,10 @@ export class KaminoObligation {
 
     let maxBorrowAmount = Decimal.min(maxObligationBorrowPower, reserveAvailableAmount, reserveBorrowCapRemained);
 
-    const debtWithdrawalCap = reserve.getDebtWithdrawalCapCapacity().sub(reserve.getDebtWithdrawalCapCurrent(slot));
+    const currentUnixTimestamp = Math.floor(Date.now() / 1000);
+    const debtWithdrawalCap = reserve
+      .getDebtWithdrawalCapCapacity()
+      .sub(reserve.getDebtWithdrawalCapCurrent(currentUnixTimestamp));
     maxBorrowAmount = reserve.getDebtWithdrawalCapCapacity().gt(0)
       ? Decimal.min(maxBorrowAmount, debtWithdrawalCap)
       : maxBorrowAmount;
@@ -1525,7 +1528,7 @@ export class KaminoObligation {
     return Decimal.max(new Decimal(0), maxBorrowAmount);
   }
 
-  getMaxWithdrawAmount(market: KaminoMarket, tokenMint: Address, slot: Slot): Decimal {
+  getMaxWithdrawAmount(market: KaminoMarket, tokenMint: Address, _slot: Slot): Decimal {
     const depositReserve = market.getReserveByMint(tokenMint);
 
     if (!depositReserve) {
@@ -1533,11 +1536,13 @@ export class KaminoObligation {
     }
 
     const reserveAvailableLiquidity = depositReserve.getLiquidityAvailableAmount();
-    const withdrawalCapRemained = depositReserve
+    const currentUnixTimestamp = Math.floor(Date.now() / 1000);
+    const depositWithdrawalCap = depositReserve
       .getDepositWithdrawalCapCapacity()
-      .sub(depositReserve.getDepositWithdrawalCapCurrent(slot));
-
-    const reserveWithdrawalLimit = Decimal.min(withdrawalCapRemained, reserveAvailableLiquidity);
+      .sub(depositReserve.getDepositWithdrawalCapCurrent(currentUnixTimestamp));
+    const reserveWithdrawalLimit = depositReserve.getDepositWithdrawalCapCapacity().gt(0)
+      ? Decimal.min(depositWithdrawalCap, reserveAvailableLiquidity)
+      : reserveAvailableLiquidity;
 
     const userDepositPosition = this.getDepositByReserve(depositReserve.address);
 

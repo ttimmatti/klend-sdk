@@ -506,7 +506,7 @@ export class KaminoMarket {
   ): Decimal {
     return obligation
       ? obligation.getMaxBorrowAmount(this, debtReserve.getLiquidityMint(), slot, requestElevationGroup)
-      : debtReserve.getMaxBorrowAmountWithCollReserve(this, collReserve, slot);
+      : debtReserve.getMaxBorrowAmountWithCollReserve(this, collReserve);
   }
 
   async loadReserves(oracleAccounts?: AllOracleAccounts) {

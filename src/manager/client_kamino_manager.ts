@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import { Command } from 'commander';
-import { Address, address, Instruction, TransactionSigner } from '@solana/kit';
+import { Address, address, generateKeyPairSigner, Instruction, TransactionSigner } from '@solana/kit';
 import {
   AssetReserveConfigCli,
   calculateAPYFromAPR,
@@ -123,9 +123,19 @@ async function main() {
       `--mode <string>`,
       'simulate|multisig|execute - simulate - to print txn simulation and to get tx simulation link in explorer, execute - execute tx, multisig - to get bs58 tx for multisig usage'
     )
+    .option(
+      '--global-admin <string>',
+      'Global admin signer (keypair path in execute/simulate modes, pubkey in multisig mode)'
+    )
+    .option('--reserve-key-path <string>', 'Path to the reserve key pair file')
     .option(`--staging`, 'If true, will use the staging programs')
-    .action(async ({ market, mint, reserveConfigPath, mode, staging }) => {
-      const env = await initEnv(undefined, staging);
+    .option(`--multisig <string>`, 'If using multisig mode this is required, otherwise will be ignored')
+    .action(async ({ market, mint, reserveConfigPath, mode, staging, globalAdmin, multisig, reserveKeyPath }) => {
+      if (mode === 'multisig' && !multisig) {
+        throw new Error('If using multisig mode, multisig pubkey is required');
+      }
+      const ms = multisig ? address(multisig) : undefined;
+      const env = await initEnv(staging, ms);
       const tokenMint = address(mint);
       const marketAddress = address(market);
       const existingMarket = await KaminoMarket.load(
@@ -161,20 +171,35 @@ async function main() {
         tokenProgram: tokenMintProgramId,
       });
 
-      const { reserve, txnIxs } = await kaminoManager.addAssetToMarketIxs({
+      let globalAdminSigner: TransactionSigner | undefined = undefined;
+      if (globalAdmin) {
+        globalAdminSigner =
+          mode === 'multisig' ? noopSigner(address(globalAdmin)) : await parseKeypairFile(globalAdmin as string);
+      }
+
+      let reserveKeypair: TransactionSigner | undefined = undefined;
+      if (reserveKeyPath) {
+        reserveKeypair = await parseKeypairFile(reserveKeyPath);
+      } else {
+        reserveKeypair = await generateKeyPairSigner();
+      }
+
+      const { createReserveIxs, configUpdateIxs } = await kaminoManager.addAssetToMarketIxs({
         admin: signer,
         adminLiquiditySource: adminAta,
         marketAddress: marketAddress,
         assetConfig: assetConfig,
+        reserveKeypair,
+        globalAdminSigner,
       });
 
-      console.log('reserve: ', reserve.address);
+      console.log('reserve: ', reserveKeypair.address);
 
-      const _createReserveSig = await processTx(
+      await processTx(
         env.c,
         signer,
         [
-          ...txnIxs[0],
+          ...createReserveIxs,
           ...getPriorityFeeAndCuIxs({
             priorityFeeMultiplier: 2500,
           }),
@@ -183,7 +208,7 @@ async function main() {
         []
       );
 
-      const [lut, createLutIxs] = await createUpdateReserveConfigLutIxs(env, marketAddress, reserve.address);
+      const [lut, createLutIxs] = await createUpdateReserveConfigLutIxs(env, marketAddress, reserveKeypair.address);
 
       await processTx(
         env.c,
@@ -198,26 +223,32 @@ async function main() {
       );
 
       const lutAcc = await fetchAddressLookupTable(env.c.rpc, lut);
-      const _updateReserveSig = await processTx(
-        env.c,
-        signer,
-        [
-          ...txnIxs[1],
-          ...getPriorityFeeAndCuIxs({
-            priorityFeeMultiplier: 2500,
-            computeUnits: 400_000,
-          }),
-        ],
-        mode,
-        [lutAcc]
-      );
+
+      // Split config update instructions into chunks to avoid transaction size limits
+      const CHUNK_SIZE = 8;
+      for (let i = 0; i < configUpdateIxs.length; i += CHUNK_SIZE) {
+        const chunk = configUpdateIxs.slice(i, i + CHUNK_SIZE);
+        await processTx(
+          env.c,
+          signer,
+          [
+            ...chunk.map((ix) => ix.ix),
+            ...getPriorityFeeAndCuIxs({
+              priorityFeeMultiplier: 2500,
+              computeUnits: 400_000,
+            }),
+          ],
+          mode,
+          [lutAcc]
+        );
+      }
 
       mode === 'execute' &&
         console.log(
           'Reserve Created with config:',
           JSON.parse(JSON.stringify(reserveConfig)),
           '\nreserve address:',
-          reserve.address
+          reserveKeypair.address
         );
     });
 
@@ -229,10 +260,18 @@ async function main() {
       `--mode <string>`,
       'simulate|multisig|execute - simulate - to print txn simulation and to get tx simulation link in explorer, execute - execute tx, multisig - to get bs58 tx for multisig usage'
     )
-    .option('--update-entire-config', 'If set, it will update entire reserve config in 1 instruction')
+    .option(
+      '--global-admin <string>',
+      'Global admin signer (keypair path in execute/simulate modes, pubkey in multisig mode)'
+    )
     .option(`--staging`, 'If true, will use the staging programs')
-    .action(async ({ reserve, reserveConfigPath, mode, updateEntireConfig, staging }) => {
-      const env = await initEnv(undefined, staging);
+    .option(`--multisig <string>`, 'If using multisig mode this is required, otherwise will be ignored')
+    .action(async ({ reserve, reserveConfigPath, mode, staging, globalAdmin, multisig }) => {
+      if (mode === 'multisig' && !multisig) {
+        throw new Error('If using multisig mode, multisig pubkey is required');
+      }
+      const ms = multisig ? address(multisig) : undefined;
+      const env = await initEnv(staging, ms);
       const reserveAddress = address(reserve);
       const reserveState = await Reserve.fetch(env.c.rpc, reserveAddress, env.klendProgramId);
       if (reserveState === null) {
@@ -269,28 +308,33 @@ async function main() {
 
       const reserveConfig = parseReserveConfigFromFile(reserveConfigFromFile);
 
-      const ixs = await kaminoManager.updateReserveIxs(
+      const updateIxs = await kaminoManager.updateReserveIxs(
         signer,
         marketWithAddress,
         reserveAddress,
         reserveConfig,
         reserveState,
-        updateEntireConfig
+        globalAdmin
       );
 
-      await processTx(
-        env.c,
-        signer,
-        [
-          ...ixs,
-          ...getPriorityFeeAndCuIxs({
-            priorityFeeMultiplier: 2500,
-            computeUnits: 400_000,
-          }),
-        ],
-        mode,
-        []
-      );
+      // Split config update instructions into chunks to avoid transaction size limits
+      const CHUNK_SIZE = 8;
+      for (let i = 0; i < updateIxs.length; i += CHUNK_SIZE) {
+        const chunk = updateIxs.slice(i, i + CHUNK_SIZE);
+        await processTx(
+          env.c,
+          signer,
+          [
+            ...chunk.map((ix) => ix.ix),
+            ...getPriorityFeeAndCuIxs({
+              priorityFeeMultiplier: 2500,
+              computeUnits: 400_000,
+            }),
+          ],
+          mode,
+          []
+        );
+      }
       mode === 'execute' && console.log('Reserve Updated with config -> ', JSON.parse(JSON.stringify(reserveConfig)));
     });
 
@@ -2877,7 +2921,7 @@ async function main() {
 
   commands
     .command('update-reserve-config-debt-cap')
-    .requiredOption('--reserve <string>', 'Lending Market address')
+    .requiredOption('--reserve <string>', 'Reserve address')
     .requiredOption(
       `--mode <string>`,
       'simulate|multisig|execute - simulate - to print txn simulation and to get tx simulation link in explorer, execute - execute tx, multisig - to get bs58 tx for multisig usage'
@@ -2926,13 +2970,18 @@ async function main() {
 
       const admin = await env.getSigner({ market: lendingMarketState });
 
-      const ixs = await kaminoManager.updateReserveIxs(admin, marketWithAddress, reserveAddress, newReserveConfig);
+      const updateIxs = await kaminoManager.updateReserveIxs(
+        admin,
+        marketWithAddress,
+        reserveAddress,
+        newReserveConfig
+      );
 
       await processTx(
         env.c,
         admin,
         [
-          ...ixs,
+          ...updateIxs.map((ix) => ix.ix),
           ...getPriorityFeeAndCuIxs({
             priorityFeeMultiplier: 2500,
             computeUnits: 400_000,

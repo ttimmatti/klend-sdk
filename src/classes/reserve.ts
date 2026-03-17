@@ -27,7 +27,6 @@ import {
   MIN_INITIAL_DEPOSIT,
   ONE_HUNDRED_PCT_IN_BPS,
   reservePdas,
-  SLOTS_PER_DAY,
   SLOTS_PER_SECOND,
   SLOTS_PER_YEAR,
   TokenOracleData,
@@ -35,9 +34,16 @@ import {
 } from '../utils';
 import { FeeCalculation, Fees, ReserveDataType, ReserveFarmInfo, ReserveRewardYield, ReserveStatus } from './shared';
 import { Reserve, ReserveFields } from '../@codegen/klend/accounts';
-import { CurvePointFields, ReserveConfig, UpdateConfigMode, UpdateConfigModeKind } from '../@codegen/klend/types';
+import {
+  CurvePointFields,
+  ReserveConfig,
+  ReserveStatus as ReserveStatusEnum,
+  UpdateConfigMode,
+  UpdateConfigModeKind,
+  WithdrawalCaps,
+} from '../@codegen/klend/types';
 import { calculateAPYFromAPR, getBorrowRate, lamportsToNumberDecimal, parseTokenSymbol, positiveOrZero } from './utils';
-import { CompositeConfigItem, encodeUsingLayout, EntireReserveConfigUpdater } from './configItems';
+import { CompositeConfigItem, ConfigUpdater, PriorityOrderedConfigUpdater } from './configItems';
 import { bfToDecimal, Fraction } from './fraction';
 import { ActionType } from './action';
 import { BorrowCapsAndCounters, ElevationGroupDescription, KaminoMarket } from './market';
@@ -365,7 +371,7 @@ export class KaminoReserve {
 
   /**
    *
-   * @returns the max capacity of the daily deposit withdrawal cap
+   * @returns the max capacity of the deposit withdrawal cap
    */
   getDepositWithdrawalCapCapacity(): Decimal {
     return new Decimal(this.state.config.depositWithdrawalCap.configCapacity.toString());
@@ -373,20 +379,15 @@ export class KaminoReserve {
 
   /**
    *
-   * @returns the current capacity of the daily deposit withdrawal cap
+   * @returns the current capacity of the deposit withdrawal cap
    */
-  getDepositWithdrawalCapCurrent(slot: Slot): Decimal {
-    const slotsElapsed = maxBigInt(slot - BigInt(this.state.lastUpdate.slot.toString()), 0n);
-    if (slotsElapsed > SLOTS_PER_DAY) {
-      return new Decimal(0);
-    } else {
-      return new Decimal(this.state.config.depositWithdrawalCap.currentTotal.toString());
-    }
+  getDepositWithdrawalCapCurrent(currentUnixTimestamp: number): Decimal {
+    return this.getWithdrawalCapCurrent(this.state.config.depositWithdrawalCap, currentUnixTimestamp);
   }
 
   /**
    *
-   * @returns the max capacity of the daily debt withdrawal cap
+   * @returns the max capacity of the debt withdrawal cap
    */
   getDebtWithdrawalCapCapacity(): Decimal {
     return new Decimal(this.state.config.debtWithdrawalCap.configCapacity.toString());
@@ -426,17 +427,24 @@ export class KaminoReserve {
     return new Decimal(this.state.borrowedAmountsAgainstThisReserveInElevationGroups[elevationGroupIndex].toString());
   }
 
+  private getWithdrawalCapCurrent(caps: WithdrawalCaps, currentUnixTimestamp: number): Decimal {
+    const intervalLength = Number(caps.configIntervalLengthSeconds.toString());
+    if (intervalLength === 0) {
+      return new Decimal(0);
+    }
+    const elapsed = currentUnixTimestamp - Number(caps.lastIntervalStartTimestamp.toString());
+    if (elapsed >= intervalLength) {
+      return new Decimal(0);
+    }
+    return new Decimal(caps.currentTotal.toString());
+  }
+
   /**
    *
-   * @returns the current capacity of the daily debt withdrawal cap
+   * @returns the current capacity of the debt withdrawal cap
    */
-  getDebtWithdrawalCapCurrent(slot: Slot): Decimal {
-    const slotsElapsed = maxBigInt(slot - BigInt(this.state.lastUpdate.slot.toString()), 0n);
-    if (slotsElapsed > SLOTS_PER_DAY) {
-      return new Decimal(0);
-    } else {
-      return new Decimal(this.state.config.debtWithdrawalCap.currentTotal.toString());
-    }
+  getDebtWithdrawalCapCurrent(currentUnixTimestamp: number): Decimal {
+    return this.getWithdrawalCapCurrent(this.state.config.debtWithdrawalCap, currentUnixTimestamp);
   }
 
   getBorrowFactor(): Decimal {
@@ -575,7 +583,7 @@ export class KaminoReserve {
     }
   }
 
-  getMaxBorrowAmountWithCollReserve(market: KaminoMarket, collReserve: KaminoReserve, slot: Slot): Decimal {
+  getMaxBorrowAmountWithCollReserve(market: KaminoMarket, collReserve: KaminoReserve): Decimal {
     const groups = market.state.elevationGroups;
     const commonElevationGroups = market.getCommonElevationGroupsForPair(collReserve, this);
 
@@ -598,7 +606,10 @@ export class KaminoReserve {
 
     let maxBorrowAmount = Decimal.min(reserveAvailableAmount, reserveBorrowCapRemained);
 
-    const debtWithdrawalCap = this.getDebtWithdrawalCapCapacity().sub(this.getDebtWithdrawalCapCurrent(slot));
+    const currentUnixTimestamp = Math.floor(Date.now() / 1000);
+    const debtWithdrawalCap = this.getDebtWithdrawalCapCapacity().sub(
+      this.getDebtWithdrawalCapCurrent(currentUnixTimestamp)
+    );
     maxBorrowAmount = this.getDebtWithdrawalCapCapacity().gt(0)
       ? Decimal.min(maxBorrowAmount, debtWithdrawalCap)
       : maxBorrowAmount;
@@ -1250,7 +1261,7 @@ export async function updateReserveConfigIx(
   return updateReserveConfig(args, accounts, undefined, programId);
 }
 
-export const RESERVE_CONFIG_UPDATER = new EntireReserveConfigUpdater((config) => ({
+export const RESERVE_CONFIG_UPDATER = new ConfigUpdater(UpdateConfigMode.fromDecoded, ReserveConfig, (config) => ({
   [UpdateConfigMode.UpdateLoanToValuePct.kind]: config.loanToValuePct,
   [UpdateConfigMode.UpdateMaxLiquidationBonusBps.kind]: config.maxLiquidationBonusBps,
   [UpdateConfigMode.UpdateLiquidationThresholdPct.kind]: config.liquidationThresholdPct,
@@ -1315,32 +1326,26 @@ export const RESERVE_CONFIG_UPDATER = new EntireReserveConfigUpdater((config) =>
   [UpdateConfigMode.UpdateDebtTermSeconds.kind]: config.debtTermSeconds,
 }));
 
-// TODO : this needs to be deprecated
-export async function updateEntireReserveConfigIx(
-  signer: TransactionSigner,
-  marketAddress: Address,
-  reserveAddress: Address,
-  reserveConfig: ReserveConfig,
-  programId: Address
-): Promise<Instruction> {
-  const args: UpdateReserveConfigArgs = {
-    mode: new UpdateConfigMode.UpdateEntireReserveConfig(),
-    value: encodeUsingLayout(ReserveConfig.layout(), reserveConfig),
-    skipConfigIntegrityValidation: false,
-  };
+export const ENTIRE_RESERVE_CONFIG_UPDATER = new PriorityOrderedConfigUpdater(RESERVE_CONFIG_UPDATER);
 
-  const globalConfig = await globalConfigPda(programId);
-  const accounts: UpdateReserveConfigAccounts = {
-    signer,
-    lendingMarket: marketAddress,
-    reserve: reserveAddress,
-    globalConfig,
-  };
+export const GLOBAL_ADMIN_ONLY_MODES = new Set<number>([
+  UpdateConfigMode.UpdateProtocolTakeRate.discriminator,
+  UpdateConfigMode.UpdateProtocolLiquidationFee.discriminator,
+  UpdateConfigMode.UpdateHostFixedInterestRateBps.discriminator,
+  UpdateConfigMode.UpdateProtocolOrderExecutionFee.discriminator,
+  UpdateConfigMode.UpdateFeesOriginationFee.discriminator,
+  UpdateConfigMode.UpdateFeesFlashLoanFee.discriminator,
+  UpdateConfigMode.UpdateBlockCTokenUsage.discriminator,
+]);
 
-  const ix = updateReserveConfig(args, accounts, undefined, programId);
-
-  return ix;
+export function isGlobalAdminOnly(mode: UpdateConfigModeKind): boolean {
+  return GLOBAL_ADMIN_ONLY_MODES.has(mode.discriminator);
 }
+
+export type ReserveConfigUpdateIx = {
+  ix: Instruction;
+  requiresGlobalAdmin: boolean;
+};
 
 export function parseForChangesReserveConfigAndGetIxs(
   marketWithAddress: MarketWithAddress,
@@ -1348,28 +1353,42 @@ export function parseForChangesReserveConfigAndGetIxs(
   reserveAddress: Address,
   reserveConfig: ReserveConfig,
   programId: Address,
-  lendingMarketOwner: TransactionSigner = noopSigner(marketWithAddress.state.lendingMarketOwner)
-): Promise<Instruction[]> {
-  const encodedConfigUpdates = RESERVE_CONFIG_UPDATER.encodeAllUpdates(reserve?.config, reserveConfig);
+  lendingMarketOwner: TransactionSigner = noopSigner(marketWithAddress.state.lendingMarketOwner),
+  globalAdminSigner?: TransactionSigner
+): Promise<ReserveConfigUpdateIx[]> {
+  const currentConfig = reserve?.config ?? defaultReserveConfig();
+  const encodedConfigUpdates = ENTIRE_RESERVE_CONFIG_UPDATER.encodeAllUpdates(
+    currentConfig,
+    reserveConfig,
+    buildReserveConfigPriority(currentConfig, reserveConfig)
+  );
+
   const filteredUpdates = encodedConfigUpdates.filter((encodedConfigUpdate) => {
-    if (isGlobalAdminOnly(encodedConfigUpdate.mode)) {
-      console.warn(`WARN: Skipping ${encodedConfigUpdate.mode.kind}. Global admin must update this separately.`);
+    if (isGlobalAdminOnly(encodedConfigUpdate.mode) && !globalAdminSigner) {
+      console.warn(
+        `WARN: Skipping ${encodedConfigUpdate.mode.kind}. Global admin must update this parameter separately.`
+      );
       return false;
     }
     return true;
   });
+
   return Promise.all(
-    filteredUpdates.map(async (encodedConfigUpdate) =>
-      updateReserveConfigIx(
-        lendingMarketOwner,
+    filteredUpdates.map(async (encodedConfigUpdate) => {
+      const requiresGlobalAdmin = isGlobalAdminOnly(encodedConfigUpdate.mode);
+
+      const signer = requiresGlobalAdmin ? globalAdminSigner! : lendingMarketOwner;
+      const ix = await updateReserveConfigIx(
+        signer,
         marketWithAddress.address,
         reserveAddress,
         encodedConfigUpdate.mode,
         encodedConfigUpdate.value,
         programId,
         shouldSkipValidation(encodedConfigUpdate.mode, reserve)
-      )
-    )
+      );
+      return { ix, requiresGlobalAdmin };
+    })
   );
 }
 
@@ -1379,38 +1398,95 @@ export type ReserveWithAddress = {
 };
 
 // Updating the deposit/borrow limit will automatically unblock usage and force validation inside the smart contract
-const DISCRIMINATORS_REQUIRING_CONFIG_VALIDATION = [
+const VALIDATED_DISCRIMINATORS = [
   UpdateConfigMode.UpdateDepositLimit.discriminator,
   UpdateConfigMode.UpdateBorrowLimit.discriminator,
 ];
 
-function shouldSkipValidation(mode: UpdateConfigModeKind, reserve: Reserve | undefined): boolean {
-  if (DISCRIMINATORS_REQUIRING_CONFIG_VALIDATION.includes(mode.discriminator)) {
+export function shouldSkipValidation(mode: UpdateConfigModeKind, reserve: Reserve | undefined): boolean {
+  if (VALIDATED_DISCRIMINATORS.includes(mode.discriminator)) {
     return false;
-  } else if (reserve == undefined) {
+  }
+
+  if (reserve == undefined) {
     return true;
   }
-  const isUsed = reserve.liquidity.availableAmount.gtn(MIN_INITIAL_DEPOSIT);
+
+  const isUsed =
+    reserve.liquidity.availableAmount.gtn(MIN_INITIAL_DEPOSIT) ||
+    reserve.liquidity.borrowedAmountSf.gtn(0) ||
+    reserve.collateral.mintTotalSupply.gtn(MIN_INITIAL_DEPOSIT);
   const isUsageBlocked = reserve.config.depositLimit.isZero() && reserve.config.borrowLimit.isZero();
   return isUsageBlocked && !isUsed;
 }
 
-function isGlobalAdminOnly(mode: UpdateConfigModeKind): boolean {
-  for (const adminOnlyMode of GLOBAL_ADMIN_ONLY_MODES) {
-    if (mode.discriminator === adminOnlyMode.discriminator) {
-      return true;
-    }
-  }
-  return false;
+/**
+ * Returns a ReserveConfig matching the on-chain defaults after init_reserve
+ * (status = Hidden, everything else zeroed).
+ * Used as the baseline for diffing when no existing reserve config is available
+ * (reserve does not exist on-chain yet)
+ */
+function defaultReserveConfig(): ReserveConfig {
+  const layout = ReserveConfig.layout();
+  const zeroed = ReserveConfig.fromDecoded(layout.decode(Buffer.alloc(layout.span)));
+  return new ReserveConfig({ ...zeroed, status: ReserveStatusEnum.Hidden.discriminator });
 }
 
-// These need to be skipped when updating the entire reserve config
-const GLOBAL_ADMIN_ONLY_MODES = [
-  UpdateConfigMode.UpdateProtocolTakeRate,
-  UpdateConfigMode.UpdateProtocolLiquidationFee,
-  UpdateConfigMode.UpdateHostFixedInterestRateBps,
-  UpdateConfigMode.UpdateProtocolOrderExecutionFee,
-  UpdateConfigMode.UpdateFeesOriginationFee,
-  UpdateConfigMode.UpdateFeesFlashLoanFee,
-  UpdateConfigMode.UpdateBlockCTokenUsage,
-];
+export function buildReserveConfigPriority(previous: ReserveConfig | undefined, changed: ReserveConfig) {
+  const currentLiquidationThreshold = previous?.liquidationThresholdPct ?? 0;
+  const liquidationThresholdIncreasing = changed.liquidationThresholdPct > currentLiquidationThreshold;
+  const autodeleverageDisabling = (previous?.autodeleverageEnabled ?? 0) !== 0 && changed.autodeleverageEnabled === 0;
+  return (mode: UpdateConfigModeKind) => priorityOf(mode, liquidationThresholdIncreasing, autodeleverageDisabling);
+}
+
+// Lowest priority gets updated first
+export function priorityOf(
+  mode: UpdateConfigModeKind,
+  liquidationThresholdIncreasing: boolean = false,
+  autodeleverageDisabling: boolean = false
+): number {
+  switch (mode.discriminator) {
+    case UpdateConfigMode.UpdateScopePriceFeed.discriminator:
+      return 0;
+    case UpdateConfigMode.UpdateTokenInfoScopeTwap.discriminator:
+    case UpdateConfigMode.UpdateTokenInfoScopeChain.discriminator:
+    case UpdateConfigMode.UpdateTokenInfoLowerHeuristic.discriminator:
+    case UpdateConfigMode.UpdateTokenInfoUpperHeuristic.discriminator:
+    case UpdateConfigMode.UpdateTokenInfoExpHeuristic.discriminator:
+    case UpdateConfigMode.UpdateTokenInfoTwapDivergence.discriminator:
+    case UpdateConfigMode.UpdateTokenInfoName.discriminator:
+    case UpdateConfigMode.UpdateTokenInfoPriceMaxAge.discriminator:
+    case UpdateConfigMode.UpdateTokenInfoTwapMaxAge.discriminator:
+    case UpdateConfigMode.UpdatePythPrice.discriminator:
+    case UpdateConfigMode.UpdateSwitchboardFeed.discriminator:
+    case UpdateConfigMode.UpdateSwitchboardTwapFeed.discriminator:
+      return 0;
+    // When disabling autodeleverage, it must be disabled before params can be zeroed out;
+    // when enabling, params must be set first (non-zero) before autodeleverage can be enabled
+    case UpdateConfigMode.UpdateDeleveragingBonusIncreaseBpsPerDay.discriminator:
+    case UpdateConfigMode.UpdateDeleveragingMarginCallPeriod.discriminator:
+    case UpdateConfigMode.UpdateDeleveragingThresholdDecreaseBpsPerDay.discriminator:
+      return priorityOf(new UpdateConfigMode.UpdateAutodeleverageEnabled()) + (autodeleverageDisabling ? 1 : -1);
+    case UpdateConfigMode.UpdateAutodeleverageEnabled.discriminator:
+      return 4;
+    case UpdateConfigMode.UpdateBorrowFactor.discriminator:
+      return 6;
+    case UpdateConfigMode.UpdateLoanToValuePct.discriminator:
+      return 8;
+    // LiquidationThreshold >= LTV must always hold
+    // If liquidation threshold is increasing, update it first
+    // All other cases, we update LTV first
+    case UpdateConfigMode.UpdateLiquidationThresholdPct.discriminator:
+      return priorityOf(new UpdateConfigMode.UpdateLoanToValuePct()) + (liquidationThresholdIncreasing ? -1 : 1);
+    // Always update last bc we cannot skip validation
+    case UpdateConfigMode.UpdateElevationGroup.discriminator:
+    case UpdateConfigMode.UpdateBorrowLimitsInElevationGroupAgainstThisReserve.discriminator:
+      return 62;
+    case UpdateConfigMode.UpdateDepositLimit.discriminator:
+      return 63;
+    case UpdateConfigMode.UpdateBorrowLimit.discriminator:
+      return 63;
+    default:
+      return 10;
+  }
+}
