@@ -39,6 +39,7 @@ interface GetSignerProps {
   useLendingMarketOwnerCached?: boolean;
   vaultState?: VaultState;
   useVaultPendingAdmin?: boolean;
+  useVaultAllocationAdmin?: boolean;
 }
 
 export class ManagerEnv {
@@ -73,6 +74,7 @@ export class ManagerEnv {
     useLendingMarketOwnerCached,
     vaultState,
     useVaultPendingAdmin,
+    useVaultAllocationAdmin,
   }: GetSignerProps = {}): Promise<TransactionSigner> {
     function matchesAdmin(config: SignerConfig, a: Address): boolean {
       return config.admin !== undefined && config.admin.address === a;
@@ -83,6 +85,10 @@ export class ManagerEnv {
         return matchesAdmin(this.signerConfig, vaultState.pendingAdmin)
           ? this.signerConfig.admin!
           : noopSigner(vaultState.pendingAdmin);
+      } else if (useVaultAllocationAdmin) {
+        return matchesAdmin(this.signerConfig, vaultState.allocationAdmin)
+          ? this.signerConfig.admin!
+          : noopSigner(vaultState.allocationAdmin);
       } else {
         return matchesAdmin(this.signerConfig, vaultState.vaultAdminAuthority)
           ? this.signerConfig.admin!

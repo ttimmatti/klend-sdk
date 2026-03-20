@@ -1764,6 +1764,7 @@ async function main() {
     .option(`--devnet`, 'If true, will use devnet programs and RPC')
     .option(`--multisig <string>`, 'If using multisig mode this is required, otherwise will be ignored')
     .option(`--skip-lut-update`, 'If set, it will skip the LUT update')
+    .option(`--use-allocation-admin`, 'Sign as allocationAdmin instead of vault admin')
     .option(`--CU <number>`, 'The number of compute units to use for the transaction')
     .action(
       async ({
@@ -1776,6 +1777,7 @@ async function main() {
         devnet,
         multisig,
         skipLutUpdate,
+        useAllocationAdmin,
         CU: cu,
       }) => {
         if (mode === 'multisig' && !multisig) {
@@ -1787,7 +1789,7 @@ async function main() {
         const vaultAddress = address(vault);
         const kaminoVault = new KaminoVault(env.c.rpc, vaultAddress, undefined, env.kvaultProgramId);
         const vaultState = await kaminoVault.getState();
-        const signer = await env.getSigner({ vaultState });
+        const signer = await env.getSigner({ vaultState, useVaultAllocationAdmin: useAllocationAdmin });
         const shouldUpdateLut = skipLutUpdate ? false : true;
         const computeUnits = cu ? cu : DEFAULT_CU_PER_TX;
         let allocationWeightValue: number;
