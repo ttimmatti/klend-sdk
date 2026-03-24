@@ -88,6 +88,9 @@ export const getAtasWithCreateIxsIfMissing = async (
   user: TransactionSigner,
   mints: Array<{ mint: Address; tokenProgram: Address }>
 ): Promise<{ atas: Address[]; createAtaIxs: Instruction[] }> => {
+  if (mints.length === 0) {
+    return { atas: [], createAtaIxs: [] };
+  }
   const atas: Array<Address> = await Promise.all(
     mints.map(async (x) => getAssociatedTokenAddress(x.mint, user.address, x.tokenProgram))
   );

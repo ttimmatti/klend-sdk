@@ -36,6 +36,9 @@ export const getInitAllReferrerTokenStateIxs = async ({
     })
   );
   const uniqueReferrerTokenStates = [...new Set<Address>(referrerTokenStates)];
+  if (uniqueReferrerTokenStates.length === 0) {
+    return initReferrerTokenStateIxs;
+  }
   const accounts = await kaminoMarket.getRpc().getMultipleAccounts(uniqueReferrerTokenStates).send();
   for (let i = 0; i < uniqueReferrerTokenStates.length; i++) {
     if (accounts.value[i] !== null) {

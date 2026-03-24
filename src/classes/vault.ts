@@ -3996,6 +3996,9 @@ export class KaminoVaultClient {
   }
 
   private async loadReserializedReserves(vaultReservesAddresses: Address[]) {
+    if (vaultReservesAddresses.length === 0) {
+      return [];
+    }
     const reserveAccounts = await this.getConnection()
       .getMultipleAccounts(vaultReservesAddresses, { commitment: 'processed' })
       .send();
