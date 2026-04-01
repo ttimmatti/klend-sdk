@@ -955,7 +955,7 @@ export class KaminoManager {
    * Get all lending markets
    * @returns an array of all lending markets
    */
-  async getAllMarkets(programId: Address = PROGRAM_ID): Promise<KaminoMarket[]> {
+  async getAllMarkets(programId: Address = this._kaminoLendProgramId): Promise<KaminoMarket[]> {
     // Get all lending markets
     const marketGenerator = getAllLendingMarketAccounts(this.getRpc(), programId);
 
