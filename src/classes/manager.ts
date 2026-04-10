@@ -596,6 +596,7 @@ export class KaminoManager {
    * @param tokenAmount - token amount to be deposited, in decimals (will be converted in lamports)
    * @param [vaultReservesMap] - optional parameter; a hashmap from each reserve pubkey to the reserve state. Optional. If provided the function will be significantly faster as it will not have to fetch the reserves
    * @param [farmState] - the state of the vault farm, if the vault has a farm. Optional. If not provided, it will be fetched
+   * @param [memo] - optional memo string to append as a memo SPL instruction
    * @returns - an instance of DepositIxs which contains the instructions to deposit in vault and the instructions to stake the shares in the farm if the vault has a farm
    */
   async depositToVaultIxs(
@@ -604,9 +605,10 @@ export class KaminoManager {
     tokenAmount: Decimal,
     vaultReservesMap?: Map<Address, KaminoReserve>,
     farmState?: FarmState,
-    payer?: TransactionSigner
+    payer?: TransactionSigner,
+    memo?: string
   ): Promise<DepositIxs> {
-    return this._vaultClient.depositIxs(user, vault, tokenAmount, vaultReservesMap, farmState, payer);
+    return this._vaultClient.depositIxs(user, vault, tokenAmount, vaultReservesMap, farmState, payer, memo);
   }
 
   /**

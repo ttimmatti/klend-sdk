@@ -1,4 +1,5 @@
 import BN from 'bn.js';
+import { getAddMemoInstruction } from '@solana-program/memo';
 import {
   Account,
   AccountRole,
@@ -1895,6 +1896,7 @@ export class KaminoVaultClient {
    * @param tokenAmount - token amount to be deposited, in decimals (will be converted in lamports)
    * @param [vaultReservesMap] - optional parameter; a hashmap from each reserve pubkey to the reserve state. Optional. If provided the function will be significantly faster as it will not have to fetch the reserves
    * @param [farmState] - the state of the vault farm, if the vault has a farm. Optional. If not provided, it will be fetched
+   * @param [memo] - optional memo string to append as a memo SPL instruction
    * @returns - an instance of DepositIxs which contains the instructions to deposit in vault and the instructions to stake the shares in the farm if the vault has a farm as well as ixs to stake in the first loss capital farm if the vault has one - only one set on ixs so stake in a farm can be used -> staking can be either done in the farm or in the first loss capital farm
    */
   async depositIxs(
@@ -1903,7 +1905,8 @@ export class KaminoVaultClient {
     tokenAmount: Decimal,
     vaultReservesMap?: Map<Address, KaminoReserve>,
     farmState?: FarmState,
-    payer?: TransactionSigner
+    payer?: TransactionSigner,
+    memo?: string
   ): Promise<DepositIxs> {
     let vaultFarmState = farmState;
     const vaultState = await vault.getState();
@@ -1917,7 +1920,7 @@ export class KaminoVaultClient {
         vaultFarmState = vaultFarmStateResult;
       }
     }
-    return this.buildShareEntryIxs('deposit', user, vault, tokenAmount, vaultReservesMap, vaultFarmState, payer);
+    return this.buildShareEntryIxs('deposit', user, vault, tokenAmount, vaultReservesMap, vaultFarmState, payer, memo);
   }
 
   async buySharesIxs(
@@ -1938,7 +1941,8 @@ export class KaminoVaultClient {
     tokenAmount: Decimal,
     vaultReservesMap?: Map<Address, KaminoReserve>,
     farmState?: FarmState,
-    payer?: TransactionSigner
+    payer?: TransactionSigner,
+    memo?: string
   ): Promise<DepositIxs> {
     const vaultState = await vault.getState();
 
@@ -2035,6 +2039,10 @@ export class KaminoVaultClient {
       stakeInFarmIfNeededIxs: [],
       stakeInFlcFarmIfNeededIxs: [],
     };
+
+    if (memo) {
+      result.depositIxs.unshift(getAddMemoInstruction({ memo, signers: [user] }));
+    }
 
     if (await vault.hasFarm()) {
       const stakeSharesIxs = await this.stakeSharesIxs(user, vault, undefined, farmState);
@@ -5781,6 +5789,7 @@ export class KaminoVault {
    * @param tokenAmount - token amount to be deposited, in decimals (will be converted in lamports)
    * @param [vaultReservesMap] - optional parameter; a hashmap from each reserve pubkey to the reserve state. Optional. If provided the function will be significantly faster as it will not have to fetch the reserves
    * @param [farmState] - the state of the vault farm, if the vault has a farm. Optional. If not provided, it will be fetched
+   * @param [memo] - optional memo string to append as a memo SPL instruction
    * @returns - an instance of DepositIxs which contains the instructions to deposit in vault and the instructions to stake the shares in the farm if the vault has a farm
    */
   async depositIxs(
@@ -5788,12 +5797,13 @@ export class KaminoVault {
     tokenAmount: Decimal,
     vaultReservesMap?: Map<Address, KaminoReserve>,
     farmState?: FarmState,
-    payer?: TransactionSigner
+    payer?: TransactionSigner,
+    memo?: string
   ): Promise<DepositIxs> {
     if (vaultReservesMap) {
       this.vaultReservesStateCache = vaultReservesMap;
     }
-    return this.client.depositIxs(user, this, tokenAmount, this.vaultReservesStateCache, farmState, payer);
+    return this.client.depositIxs(user, this, tokenAmount, this.vaultReservesStateCache, farmState, payer, memo);
   }
 
   /**
