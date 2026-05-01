@@ -85,12 +85,11 @@ yarn kamino-manager download-reserve-config --reserve reserve_address --staging
 #### Update a reserve config
 
 ```
-yarn kamino-manager update-reserve-config --reserve reserve_address --reserve-config-path ./configs/reserve_config_example.json --staging --update-entire-config --mode execute
+yarn kamino-manager update-reserve-config --reserve reserve_address --reserve-config-path ./configs/reserve_config_example.json --staging --mode execute
 ```
 
 - **reserve** - address to update the reserve config for
 - **reserve-config-path** - the path to the config file to be used
-- **update-entire-config** - wether to update the entrie reserve config or just the difference between current on-chain state and given config
 - **mode** - can have these values:
   - *inspect* - will print an url to the explorer txn inspection, where it can be simulated
   - *simulate* - will print the simulation outputs
@@ -122,7 +121,7 @@ yarn kamino-manager download-lending-market-config-and-all-reserves-configs --le
 #### Update a lending market
 
 ```
-yarn kamino-manager update-lending-market-from-config --lending-market lending_market_address --staging --lending-market-config-path ./configs/lending_market_address/market-lending_market_address.json --mode inspect --staging
+yarn kamino-manager update-lending-market-from-config --lending-market lending_market_address --lending-market-config-path ./configs/lending_market_address/market-lending_market_address.json --mode inspect --staging
 ```
 
 - **lending-market** - address of market to update the config for

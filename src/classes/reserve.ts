@@ -1481,8 +1481,10 @@ export function priorityOf(
     // Always update last bc we cannot skip validation
     case UpdateConfigMode.UpdateElevationGroup.discriminator:
     case UpdateConfigMode.UpdateBorrowLimitsInElevationGroupAgainstThisReserve.discriminator:
+    case UpdateConfigMode.UpdateMinLiquidationBonusBps.discriminator:
       return 62;
     case UpdateConfigMode.UpdateDepositLimit.discriminator:
+    case UpdateConfigMode.UpdateMaxLiquidationBonusBps.discriminator:
       return 63;
     case UpdateConfigMode.UpdateBorrowLimit.discriminator:
       return 63;

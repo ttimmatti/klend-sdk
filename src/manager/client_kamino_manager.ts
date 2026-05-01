@@ -22,9 +22,11 @@ import {
   KVaultGlobalConfig,
   lamportsToDecimal,
   LendingMarket,
+  type LendingMarketJSON,
   parseBooleanFlag,
   parseTokenSymbol,
   parseZeroPaddedUtf8,
+  renderZeroPaddedUtf8,
   programDataPda,
   Reserve,
   ReserveAllocationConfig,
@@ -42,6 +44,7 @@ import {
   WithdrawalCaps,
 } from '../@codegen/klend/types';
 import { Fraction } from '../classes/fraction';
+import { trimPoints } from '../classes/curve';
 import Decimal from 'decimal.js';
 import BN from 'bn.js';
 import { PythConfiguration, SwitchboardConfiguration, UpdateReserveWhitelistMode } from '../@codegen/kvault/types';
@@ -67,301 +70,6 @@ async function main() {
   const commands = new Command();
 
   commands.name('kamino-manager-cli').description('CLI to interact with the kvaults and klend programs');
-
-  commands
-    .command('create-market')
-    .requiredOption(
-      `--mode <string>`,
-      'simulate|multisig|execute - simulate - to print txn simulation and to get tx simulation link in explorer, execute - execute tx, multisig - to get bs58 tx for multisig usage'
-    )
-    .option(`--staging`, 'If true, will use the staging programs')
-    .option(`--devnet`, 'If true, will use devnet programs and RPC')
-    .option(`--multisig <string>`, 'If using multisig mode this is required, otherwise will be ignored')
-    .action(async ({ mode, staging, devnet, multisig }) => {
-      if (mode === 'multisig' && !multisig) {
-        throw new Error('If using multisig mode, multisig pubkey is required');
-      }
-      const ms = multisig ? address(multisig) : undefined;
-      const env = await initEnv(staging, ms, undefined, undefined, devnet);
-      const admin = await env.getSigner();
-
-      const kaminoManager = new KaminoManager(
-        env.c.rpc,
-        DEFAULT_RECENT_SLOT_DURATION_MS,
-        env.klendProgramId,
-        env.kvaultProgramId,
-        undefined,
-        env.farmsProgramId
-      );
-
-      const { market: marketKp, ixs: createMarketIxs } = await kaminoManager.createMarketIxs({
-        admin,
-      });
-
-      await processTx(
-        env.c,
-        admin,
-        [
-          ...createMarketIxs,
-          ...getPriorityFeeAndCuIxs({
-            priorityFeeMultiplier: 2500,
-          }),
-        ],
-        mode,
-        []
-      );
-
-      mode === 'execute' && console.log('Market created:', marketKp.address);
-    });
-
-  commands
-    .command('add-asset-to-market')
-    .requiredOption('--market <string>', 'Market address to add asset to')
-    .requiredOption('--mint <string>', 'Reserve liquidity token mint')
-    .requiredOption('--reserve-config-path <string>', 'Path for the reserve config')
-    .requiredOption(
-      `--mode <string>`,
-      'simulate|multisig|execute - simulate - to print txn simulation and to get tx simulation link in explorer, execute - execute tx, multisig - to get bs58 tx for multisig usage'
-    )
-    .option(
-      '--global-admin <string>',
-      'Global admin signer (keypair path in execute/simulate modes, pubkey in multisig mode)'
-    )
-    .option('--reserve-key-path <string>', 'Path to the reserve key pair file')
-    .option(`--staging`, 'If true, will use the staging programs')
-    .option(`--multisig <string>`, 'If using multisig mode this is required, otherwise will be ignored')
-    .action(async ({ market, mint, reserveConfigPath, mode, staging, globalAdmin, multisig, reserveKeyPath }) => {
-      if (mode === 'multisig' && !multisig) {
-        throw new Error('If using multisig mode, multisig pubkey is required');
-      }
-      const ms = multisig ? address(multisig) : undefined;
-      const env = await initEnv(staging, ms);
-      const tokenMint = address(mint);
-      const marketAddress = address(market);
-      const existingMarket = await KaminoMarket.load(
-        env.c.rpc,
-        marketAddress,
-        DEFAULT_RECENT_SLOT_DURATION_MS,
-        env.klendProgramId,
-        false
-      );
-      if (existingMarket === null) {
-        throw new Error(`Market ${marketAddress} does not exist`);
-      }
-      const signer = await env.getSigner({ market: existingMarket });
-      const mintAccount = await fetchMint(env.c.rpc, mint);
-      const tokenMintProgramId = mintAccount.programAddress;
-      const kaminoManager = new KaminoManager(
-        env.c.rpc,
-        DEFAULT_RECENT_SLOT_DURATION_MS,
-        env.klendProgramId,
-        env.kvaultProgramId,
-        undefined,
-        env.farmsProgramId
-      );
-
-      const reserveConfigFromFile = JSON.parse(fs.readFileSync(reserveConfigPath, 'utf8'));
-
-      const reserveConfig = parseReserveConfigFromFile(reserveConfigFromFile);
-      const assetConfig = new AssetReserveConfigCli(tokenMint, tokenMintProgramId, reserveConfig);
-
-      const [adminAta] = await findAssociatedTokenPda({
-        mint: tokenMint,
-        owner: signer.address,
-        tokenProgram: tokenMintProgramId,
-      });
-
-      let globalAdminSigner: TransactionSigner | undefined = undefined;
-      if (globalAdmin) {
-        globalAdminSigner =
-          mode === 'multisig' ? noopSigner(address(globalAdmin)) : await parseKeypairFile(globalAdmin as string);
-      }
-
-      let reserveKeypair: TransactionSigner | undefined = undefined;
-      if (reserveKeyPath) {
-        reserveKeypair = await parseKeypairFile(reserveKeyPath);
-      } else {
-        reserveKeypair = await generateKeyPairSigner();
-      }
-
-      const { createReserveIxs, configUpdateIxs } = await kaminoManager.addAssetToMarketIxs({
-        admin: signer,
-        adminLiquiditySource: adminAta,
-        marketAddress: marketAddress,
-        assetConfig: assetConfig,
-        reserveKeypair,
-        globalAdminSigner,
-      });
-
-      console.log('reserve: ', reserveKeypair.address);
-
-      await processTx(
-        env.c,
-        signer,
-        [
-          ...createReserveIxs,
-          ...getPriorityFeeAndCuIxs({
-            priorityFeeMultiplier: 2500,
-          }),
-        ],
-        mode,
-        []
-      );
-
-      const [lut, createLutIxs] = await createUpdateReserveConfigLutIxs(env, marketAddress, reserveKeypair.address);
-
-      await processTx(
-        env.c,
-        signer,
-        [
-          ...createLutIxs,
-          ...getPriorityFeeAndCuIxs({
-            priorityFeeMultiplier: 2500,
-          }),
-        ],
-        mode
-      );
-
-      const lutAcc = await fetchAddressLookupTable(env.c.rpc, lut);
-
-      // Split config update instructions into chunks to avoid transaction size limits
-      const CHUNK_SIZE = 8;
-      for (let i = 0; i < configUpdateIxs.length; i += CHUNK_SIZE) {
-        const chunk = configUpdateIxs.slice(i, i + CHUNK_SIZE);
-        await processTx(
-          env.c,
-          signer,
-          [
-            ...chunk.map((ix) => ix.ix),
-            ...getPriorityFeeAndCuIxs({
-              priorityFeeMultiplier: 2500,
-              computeUnits: 400_000,
-            }),
-          ],
-          mode,
-          [lutAcc]
-        );
-      }
-
-      mode === 'execute' &&
-        console.log(
-          'Reserve Created with config:',
-          JSON.parse(JSON.stringify(reserveConfig)),
-          '\nreserve address:',
-          reserveKeypair.address
-        );
-    });
-
-  commands
-    .command('update-reserve-config')
-    .requiredOption('--reserve <string>', 'Reserve address')
-    .requiredOption('--reserve-config-path <string>', 'Path for the reserve config')
-    .requiredOption(
-      `--mode <string>`,
-      'simulate|multisig|execute - simulate - to print txn simulation and to get tx simulation link in explorer, execute - execute tx, multisig - to get bs58 tx for multisig usage'
-    )
-    .option(
-      '--global-admin <string>',
-      'Global admin signer (keypair path in execute/simulate modes, pubkey in multisig mode)'
-    )
-    .option(`--staging`, 'If true, will use the staging programs')
-    .option(`--multisig <string>`, 'If using multisig mode this is required, otherwise will be ignored')
-    .action(async ({ reserve, reserveConfigPath, mode, staging, globalAdmin, multisig }) => {
-      if (mode === 'multisig' && !multisig) {
-        throw new Error('If using multisig mode, multisig pubkey is required');
-      }
-      const ms = multisig ? address(multisig) : undefined;
-      const env = await initEnv(staging, ms);
-      const reserveAddress = address(reserve);
-      const reserveState = await Reserve.fetch(env.c.rpc, reserveAddress, env.klendProgramId);
-      if (reserveState === null) {
-        throw new Error(`Reserve ${reserveAddress} not found`);
-      }
-
-      const marketAddress = reserveState.lendingMarket;
-      const marketState = await KaminoMarket.load(
-        env.c.rpc,
-        marketAddress,
-        DEFAULT_RECENT_SLOT_DURATION_MS,
-        env.klendProgramId,
-        false
-      );
-      if (marketState === null) {
-        throw new Error(`Market ${marketAddress} not found`);
-      }
-      const signer = await env.getSigner({ market: marketState });
-      const marketWithAddress: MarketWithAddress = {
-        address: marketAddress,
-        state: marketState.state,
-      };
-
-      const kaminoManager = new KaminoManager(
-        env.c.rpc,
-        DEFAULT_RECENT_SLOT_DURATION_MS,
-        env.klendProgramId,
-        env.kvaultProgramId,
-        undefined,
-        env.farmsProgramId
-      );
-
-      const reserveConfigFromFile = JSON.parse(fs.readFileSync(reserveConfigPath, 'utf8'));
-
-      const reserveConfig = parseReserveConfigFromFile(reserveConfigFromFile);
-
-      const updateIxs = await kaminoManager.updateReserveIxs(
-        signer,
-        marketWithAddress,
-        reserveAddress,
-        reserveConfig,
-        reserveState,
-        globalAdmin
-      );
-
-      // Split config update instructions into chunks to avoid transaction size limits
-      const CHUNK_SIZE = 8;
-      for (let i = 0; i < updateIxs.length; i += CHUNK_SIZE) {
-        const chunk = updateIxs.slice(i, i + CHUNK_SIZE);
-        await processTx(
-          env.c,
-          signer,
-          [
-            ...chunk.map((ix) => ix.ix),
-            ...getPriorityFeeAndCuIxs({
-              priorityFeeMultiplier: 2500,
-              computeUnits: 400_000,
-            }),
-          ],
-          mode,
-          []
-        );
-      }
-      mode === 'execute' && console.log('Reserve Updated with config -> ', JSON.parse(JSON.stringify(reserveConfig)));
-    });
-
-  commands
-    .command('download-reserve-config')
-    .requiredOption('--reserve <string>', 'Reserve address')
-    .option(`--staging`, 'If true, will use the staging programs')
-    .action(async ({ reserve, staging }) => {
-      const env = await initEnv(undefined, staging);
-      const reserveAddress = address(reserve);
-      const reserveState = await Reserve.fetch(env.c.rpc, reserveAddress, env.klendProgramId);
-      if (!reserveState) {
-        throw new Error('Reserve not found');
-      }
-
-      fs.mkdirSync('./configs/' + reserveState.lendingMarket, { recursive: true });
-
-      const decoder = new TextDecoder('utf-8');
-      const reserveName = decoder.decode(Uint8Array.from(reserveState.config.tokenInfo.name)).replace(/\0/g, '');
-
-      const reserveConfigDisplay = parseReserveConfigToFile(reserveState.config);
-
-      fs.writeFileSync(
-        './configs/' + reserveState.lendingMarket + '/' + reserveName + '.json',
-        JSON.stringify(reserveConfigDisplay, null, 2)
-      );
-    });
 
   commands
     .command('init-kvault-global-config')
@@ -2384,7 +2092,7 @@ async function main() {
         kaminoVault,
         await env.c.rpc.getSlot({ commitment: 'confirmed' }).send()
       );
-      console.log(`Tokens per share for vault ${vaultAddress.toBase58()}: ${tokensPerShare}`);
+      console.log(`Tokens per share for vault ${vaultAddress.toString()}: ${tokensPerShare}`);
     });
 
   commands
@@ -2624,29 +2332,6 @@ async function main() {
     });
 
   commands
-    .command('download-lending-market-config')
-    .requiredOption('--lending-market <string>', 'Lending Market Address')
-    .option(`--staging`, 'If true, will use the staging programs')
-    .action(async ({ lendingMarket, staging }) => {
-      const env = await initEnv(false, staging);
-      const lendingMarketAddress = address(lendingMarket);
-      const lendingMarketState = await LendingMarket.fetch(env.c.rpc, lendingMarketAddress, env.klendProgramId);
-
-      if (!lendingMarketState) {
-        throw new Error('Lending Market not found');
-      }
-
-      fs.mkdirSync('./configs/' + lendingMarketAddress.toBase58(), { recursive: true });
-
-      const lendingMarketConfigForFile = lendingMarketState.toJSON();
-
-      fs.writeFileSync(
-        './configs/' + lendingMarketAddress.toBase58() + '/market-' + lendingMarketAddress.toBase58() + '.json',
-        JSON.stringify(lendingMarketConfigForFile, null, 2)
-      );
-    });
-
-  commands
     .command('compute-alloc')
     .requiredOption('--vault <string>', 'Vault address')
     .option(`--staging`, 'If true, will use the staging programs')
@@ -2677,6 +2362,407 @@ async function main() {
       console.log('computedAllocation', computedAllocation);
     });
 
+  // example:  yarn kamino-manager get-market-or-vault-admin-info --address A2wsxhA7pF4B2UKVfXocb6TAAP9ipfPJam6oMKgDE5BK
+  commands
+    .command('check-vault-release-status')
+    .requiredOption('--vault <string>', 'Vault address')
+    .option(`--staging`, 'If true, will use the staging programs')
+    .option(`--devnet`, 'If true, will use devnet programs and RPC')
+    .action(async ({ vault, staging, devnet }) => {
+      const env = await initEnv(staging, undefined, undefined, undefined, devnet);
+      const slotDuration = await getMedianSlotDurationInMsFromLastEpochs();
+      const kaminoManager = new KaminoManager(env.c.rpc, slotDuration, env.klendProgramId, env.kvaultProgramId);
+      const kaminoVault = new KaminoVault(env.c.rpc, address(vault), undefined, env.kvaultProgramId, slotDuration);
+
+      const result = await kaminoManager.checkVaultReleaseStatus(kaminoVault);
+
+      if (result.errors.length > 0) {
+        console.log('\nErrors:');
+        for (const error of result.errors) {
+          console.log(`  ❌ ${error}`);
+        }
+      }
+      if (result.warnings.length > 0) {
+        console.log('\nWarnings:');
+        for (const warning of result.warnings) {
+          console.log(`  ⚠️  ${warning}`);
+        }
+      }
+      if (result.success) {
+        console.log('\n✅ Vault is ready for release');
+      } else {
+        console.log('\n❌ Vault is NOT ready for release');
+      }
+    });
+
+  commands
+    .command('claim-rewards-for-vault')
+    .requiredOption('--vault <string>', 'Vault address')
+    .requiredOption(
+      `--mode <string>`,
+      'simulate|multisig|execute - simulate - to print txn simulation and to get tx simulation link in explorer, execute - execute tx, multisig - to get bs58 tx for multisig usage'
+    )
+    .option(`--staging`, 'If true, will use the staging programs')
+    .option(`--devnet`, 'If true, will use devnet programs and RPC')
+    .option(`--user <string>`, 'User address')
+    .action(async ({ vault, mode, staging, devnet, user }) => {
+      const env = await initEnv(staging, undefined, undefined, undefined, devnet);
+      const vaultAddress = address(vault);
+      const kaminoVault = new KaminoVault(env.c.rpc, vaultAddress);
+      const kaminoManager = new KaminoManager(
+        env.c.rpc,
+        DEFAULT_RECENT_SLOT_DURATION_MS,
+        env.klendProgramId,
+        env.kvaultProgramId,
+        undefined,
+        env.farmsProgramId
+      );
+      const userWallet = user ? noopSigner(address(user)) : await env.getSigner();
+      const rewardsIxs = await kaminoManager.getClaimAllRewardsForVaultIxs(userWallet, kaminoVault);
+
+      if (rewardsIxs.length > 0) {
+        await processTx(
+          env.c,
+          userWallet,
+          [
+            ...rewardsIxs,
+            ...getPriorityFeeAndCuIxs({
+              priorityFeeMultiplier: 2500,
+              computeUnits: 400_000,
+            }),
+          ],
+          mode,
+          []
+        );
+      } else {
+        console.log('No rewards to claim');
+      }
+    });
+
+  commands
+    .command('create-market')
+    .requiredOption(
+      `--mode <string>`,
+      'simulate|multisig|execute - simulate - to print txn simulation and to get tx simulation link in explorer, execute - execute tx, multisig - to get bs58 tx for multisig usage'
+    )
+    .option(`--staging`, 'If true, will use the staging programs')
+    .option(`--devnet`, 'If true, will use devnet programs and RPC')
+    .option(`--multisig <string>`, 'If using multisig mode this is required, otherwise will be ignored')
+    .action(async ({ mode, staging, devnet, multisig }) => {
+      if (mode === 'multisig' && !multisig) {
+        throw new Error('If using multisig mode, multisig pubkey is required');
+      }
+      const ms = multisig ? address(multisig) : undefined;
+      const env = await initEnv(staging, ms, undefined, undefined, devnet);
+      const admin = await env.getSigner();
+
+      const kaminoManager = new KaminoManager(
+        env.c.rpc,
+        DEFAULT_RECENT_SLOT_DURATION_MS,
+        env.klendProgramId,
+        env.kvaultProgramId,
+        undefined,
+        env.farmsProgramId
+      );
+
+      const { market: marketKp, ixs: createMarketIxs } = await kaminoManager.createMarketIxs({
+        admin,
+      });
+
+      await processTx(
+        env.c,
+        admin,
+        [
+          ...createMarketIxs,
+          ...getPriorityFeeAndCuIxs({
+            priorityFeeMultiplier: 2500,
+          }),
+        ],
+        mode,
+        []
+      );
+
+      mode === 'execute' && console.log('Market created:', marketKp.address);
+    });
+
+  commands
+    .command('add-asset-to-market')
+    .requiredOption('--market <string>', 'Market address to add asset to')
+    .requiredOption('--mint <string>', 'Reserve liquidity token mint')
+    .requiredOption('--reserve-config-path <string>', 'Path for the reserve config')
+    .requiredOption(
+      `--mode <string>`,
+      'simulate|multisig|execute - simulate - to print txn simulation and to get tx simulation link in explorer, execute - execute tx, multisig - to get bs58 tx for multisig usage'
+    )
+    .option(
+      '--global-admin <string>',
+      'Global admin signer (keypair path in execute/simulate modes, pubkey in multisig mode)'
+    )
+    .option('--reserve-key-path <string>', 'Path to the reserve key pair file')
+    .option(`--staging`, 'If true, will use the staging programs')
+    .option(`--multisig <string>`, 'If using multisig mode this is required, otherwise will be ignored')
+    .action(async ({ market, mint, reserveConfigPath, mode, staging, globalAdmin, multisig, reserveKeyPath }) => {
+      if (mode === 'multisig' && !multisig) {
+        throw new Error('If using multisig mode, multisig pubkey is required');
+      }
+      const ms = multisig ? address(multisig) : undefined;
+      const env = await initEnv(staging, ms);
+      const tokenMint = address(mint);
+      const marketAddress = address(market);
+      const existingMarket = await KaminoMarket.load(
+        env.c.rpc,
+        marketAddress,
+        DEFAULT_RECENT_SLOT_DURATION_MS,
+        env.klendProgramId,
+        false
+      );
+      if (existingMarket === null) {
+        throw new Error(`Market ${marketAddress} does not exist`);
+      }
+      const signer = await env.getSigner({ market: existingMarket });
+      const mintAccount = await fetchMint(env.c.rpc, mint);
+      const tokenMintProgramId = mintAccount.programAddress;
+      const kaminoManager = new KaminoManager(
+        env.c.rpc,
+        DEFAULT_RECENT_SLOT_DURATION_MS,
+        env.klendProgramId,
+        env.kvaultProgramId,
+        undefined,
+        env.farmsProgramId
+      );
+
+      const reserveConfigFromFile = JSON.parse(fs.readFileSync(reserveConfigPath, 'utf8'));
+
+      const reserveConfig = parseReserveConfigFromFile(reserveConfigFromFile);
+      const assetConfig = new AssetReserveConfigCli(tokenMint, tokenMintProgramId, reserveConfig);
+
+      const [adminAta] = await findAssociatedTokenPda({
+        mint: tokenMint,
+        owner: signer.address,
+        tokenProgram: tokenMintProgramId,
+      });
+
+      let globalAdminSigner: TransactionSigner | undefined = undefined;
+      if (globalAdmin) {
+        globalAdminSigner =
+          mode === 'multisig' ? noopSigner(address(globalAdmin)) : await parseKeypairFile(globalAdmin as string);
+      }
+
+      let reserveKeypair: TransactionSigner | undefined = undefined;
+      if (reserveKeyPath) {
+        reserveKeypair = await parseKeypairFile(reserveKeyPath);
+      } else {
+        reserveKeypair = await generateKeyPairSigner();
+      }
+
+      const { createReserveIxs, configUpdateIxs } = await kaminoManager.addAssetToMarketIxs({
+        admin: signer,
+        adminLiquiditySource: adminAta,
+        marketAddress: marketAddress,
+        assetConfig: assetConfig,
+        reserveKeypair,
+        globalAdminSigner,
+      });
+
+      console.log('reserve: ', reserveKeypair.address);
+
+      await processTx(
+        env.c,
+        signer,
+        [
+          ...createReserveIxs,
+          ...getPriorityFeeAndCuIxs({
+            priorityFeeMultiplier: 2500,
+          }),
+        ],
+        mode,
+        []
+      );
+
+      const [lut, createLutIxs] = await createUpdateReserveConfigLutIxs(env, marketAddress, reserveKeypair.address);
+
+      await processTx(
+        env.c,
+        signer,
+        [
+          ...createLutIxs,
+          ...getPriorityFeeAndCuIxs({
+            priorityFeeMultiplier: 2500,
+          }),
+        ],
+        mode
+      );
+
+      const lutAcc = await fetchAddressLookupTable(env.c.rpc, lut);
+
+      // Split config update instructions into chunks to avoid transaction size limits
+      const CHUNK_SIZE = 8;
+      for (let i = 0; i < configUpdateIxs.length; i += CHUNK_SIZE) {
+        const chunk = configUpdateIxs.slice(i, i + CHUNK_SIZE);
+        await processTx(
+          env.c,
+          signer,
+          [
+            ...chunk.map((ix) => ix.ix),
+            ...getPriorityFeeAndCuIxs({
+              priorityFeeMultiplier: 2500,
+              computeUnits: 400_000,
+            }),
+          ],
+          mode,
+          [lutAcc]
+        );
+      }
+
+      mode === 'execute' &&
+        console.log(
+          'Reserve Created with config:',
+          JSON.parse(JSON.stringify(reserveConfig)),
+          '\nreserve address:',
+          reserveKeypair.address
+        );
+    });
+
+  commands
+    .command('update-reserve-config')
+    .requiredOption('--reserve <string>', 'Reserve address')
+    .requiredOption('--reserve-config-path <string>', 'Path for the reserve config')
+    .requiredOption(
+      `--mode <string>`,
+      'simulate|multisig|execute - simulate - to print txn simulation and to get tx simulation link in explorer, execute - execute tx, multisig - to get bs58 tx for multisig usage'
+    )
+    .option(
+      '--global-admin <string>',
+      'Global admin signer (keypair path in execute/simulate modes, pubkey in multisig mode)'
+    )
+    .option(`--staging`, 'If true, will use the staging programs')
+    .option(`--multisig <string>`, 'If using multisig mode this is required, otherwise will be ignored')
+    .action(async ({ reserve, reserveConfigPath, mode, staging, globalAdmin, multisig }) => {
+      if (mode === 'multisig' && !multisig) {
+        throw new Error('If using multisig mode, multisig pubkey is required');
+      }
+      const ms = multisig ? address(multisig) : undefined;
+      const env = await initEnv(staging, ms);
+      const reserveAddress = address(reserve);
+      const reserveState = await Reserve.fetch(env.c.rpc, reserveAddress, env.klendProgramId);
+      if (reserveState === null) {
+        throw new Error(`Reserve ${reserveAddress} not found`);
+      }
+
+      const marketAddress = reserveState.lendingMarket;
+      const marketState = await KaminoMarket.load(
+        env.c.rpc,
+        marketAddress,
+        DEFAULT_RECENT_SLOT_DURATION_MS,
+        env.klendProgramId,
+        false
+      );
+      if (marketState === null) {
+        throw new Error(`Market ${marketAddress} not found`);
+      }
+      const signer = await env.getSigner({ market: marketState });
+      const marketWithAddress: MarketWithAddress = {
+        address: marketAddress,
+        state: marketState.state,
+      };
+
+      const kaminoManager = new KaminoManager(
+        env.c.rpc,
+        DEFAULT_RECENT_SLOT_DURATION_MS,
+        env.klendProgramId,
+        env.kvaultProgramId,
+        undefined,
+        env.farmsProgramId
+      );
+
+      const reserveConfigFromFile = JSON.parse(fs.readFileSync(reserveConfigPath, 'utf8'));
+
+      const reserveConfig = parseReserveConfigFromFile(reserveConfigFromFile);
+
+      const updateIxs = await kaminoManager.updateReserveIxs(
+        signer,
+        marketWithAddress,
+        reserveAddress,
+        reserveConfig,
+        reserveState,
+        globalAdmin
+      );
+
+      if (updateIxs.length === 0) {
+        console.log('No changes to reserve config');
+        return;
+      }
+
+      // Split config update instructions into chunks to avoid transaction size limits
+      const CHUNK_SIZE = 8;
+      for (let i = 0; i < updateIxs.length; i += CHUNK_SIZE) {
+        const chunk = updateIxs.slice(i, i + CHUNK_SIZE);
+        await processTx(
+          env.c,
+          signer,
+          [
+            ...chunk.map((ix) => ix.ix),
+            ...getPriorityFeeAndCuIxs({
+              priorityFeeMultiplier: 2500,
+              computeUnits: 400_000,
+            }),
+          ],
+          mode,
+          []
+        );
+      }
+      mode === 'execute' && console.log('Reserve Updated with config -> ', JSON.parse(JSON.stringify(reserveConfig)));
+    });
+
+  commands
+    .command('download-reserve-config')
+    .requiredOption('--reserve <string>', 'Reserve address')
+    .option(`--staging`, 'If true, will use the staging programs')
+    .action(async ({ reserve, staging }) => {
+      const env = await initEnv(undefined, staging);
+      const reserveAddress = address(reserve);
+      const reserveState = await Reserve.fetch(env.c.rpc, reserveAddress, env.klendProgramId);
+      if (!reserveState) {
+        throw new Error('Reserve not found');
+      }
+
+      fs.mkdirSync('./configs/' + reserveState.lendingMarket, { recursive: true });
+
+      const decoder = new TextDecoder('utf-8');
+      const reserveName = decoder.decode(Uint8Array.from(reserveState.config.tokenInfo.name)).replace(/\0/g, '');
+
+      const reserveConfigDisplay = parseReserveConfigToFile(reserveState.config);
+
+      fs.writeFileSync(
+        './configs/' + reserveState.lendingMarket + '/' + reserveName + '-' + reserveAddress.toString() + '.json',
+        JSON.stringify(reserveConfigDisplay, null, 2)
+      );
+    });
+
+  commands
+    .command('download-lending-market-config')
+    .requiredOption('--lending-market <string>', 'Lending Market Address')
+    .option(`--staging`, 'If true, will use the staging programs')
+    .action(async ({ lendingMarket, staging }) => {
+      const env = await initEnv(false, staging);
+      const lendingMarketAddress = address(lendingMarket);
+      const lendingMarketState = await LendingMarket.fetch(env.c.rpc, lendingMarketAddress, env.klendProgramId);
+
+      if (!lendingMarketState) {
+        throw new Error('Lending Market not found');
+      }
+
+      fs.mkdirSync('./configs/' + lendingMarketAddress.toString(), { recursive: true });
+
+      const lendingMarketConfigForFile = lendingMarketToConfigFileJSON(lendingMarketState);
+      const marketName = parseZeroPaddedUtf8(lendingMarketState.name);
+
+      fs.writeFileSync(
+        './configs/' + lendingMarketAddress.toString() + '/market-' + marketName + '-' + lendingMarketAddress.toString() + '.json',
+        JSON.stringify(lendingMarketConfigForFile, null, 2)
+      );
+    });
+
   commands
     .command('download-lending-market-config-and-all-reserves-configs')
     .requiredOption('--lending-market <string>', 'Lending Market Address')
@@ -2703,12 +2789,13 @@ async function main() {
         throw new Error('Lending Market not found');
       }
 
-      fs.mkdirSync('./configs/' + lendingMarketAddress.toBase58(), { recursive: true });
+      fs.mkdirSync('./configs/' + lendingMarketAddress.toString(), { recursive: true });
 
-      const lendingMarketConfigForFile = lendingMarketState.toJSON();
+      const lendingMarketConfigForFile = lendingMarketToConfigFileJSON(lendingMarketState);
+      const marketName = parseZeroPaddedUtf8(lendingMarketState.name);
 
       fs.writeFileSync(
-        './configs/' + lendingMarketAddress.toBase58() + '/market-' + lendingMarketAddress.toBase58() + '.json',
+        './configs/' + lendingMarketAddress.toString() + '/market-' + marketName + '-' + lendingMarketAddress.toString() + '.json',
         JSON.stringify(lendingMarketConfigForFile, null, 2)
       );
 
@@ -2719,7 +2806,13 @@ async function main() {
         const reserveConfigDisplay = parseReserveConfigToFile(reserveState.config);
 
         fs.writeFileSync(
-          './configs/' + lendingMarketAddress.toBase58() + '/' + reserveName + '.json',
+          './configs/' +
+            lendingMarketAddress.toString() +
+            '/' +
+            reserveName +
+            '-' +
+            reserve.address.toString() +
+            '.json',
           JSON.stringify(reserveConfigDisplay, null, 2)
         );
       });
@@ -2762,7 +2855,10 @@ async function main() {
         env.farmsProgramId
       );
 
-      const newLendingMarket = LendingMarket.fromJSON(JSON.parse(fs.readFileSync(lendingMarketConfigPath, 'utf8')));
+      const newLendingMarket = parseLendingMarketConfigFromFile(
+        JSON.parse(fs.readFileSync(lendingMarketConfigPath, 'utf8')),
+        lendingMarketAccount.state
+      );
 
       const signer = await env.getSigner({ market: lendingMarketAccount });
       const ixs = kaminoManager.updateLendingMarketIxs(signer, marketWithAddress, newLendingMarket);
@@ -3007,83 +3103,6 @@ async function main() {
       console.log(adminInfo);
     });
 
-  // example:  yarn kamino-manager get-market-or-vault-admin-info --address A2wsxhA7pF4B2UKVfXocb6TAAP9ipfPJam6oMKgDE5BK
-  commands
-    .command('check-vault-release-status')
-    .requiredOption('--vault <string>', 'Vault address')
-    .option(`--staging`, 'If true, will use the staging programs')
-    .option(`--devnet`, 'If true, will use devnet programs and RPC')
-    .action(async ({ vault, staging, devnet }) => {
-      const env = await initEnv(staging, undefined, undefined, undefined, devnet);
-      const slotDuration = await getMedianSlotDurationInMsFromLastEpochs();
-      const kaminoManager = new KaminoManager(env.c.rpc, slotDuration, env.klendProgramId, env.kvaultProgramId);
-      const kaminoVault = new KaminoVault(env.c.rpc, address(vault), undefined, env.kvaultProgramId, slotDuration);
-
-      const result = await kaminoManager.checkVaultReleaseStatus(kaminoVault);
-
-      if (result.errors.length > 0) {
-        console.log('\nErrors:');
-        for (const error of result.errors) {
-          console.log(`  ❌ ${error}`);
-        }
-      }
-      if (result.warnings.length > 0) {
-        console.log('\nWarnings:');
-        for (const warning of result.warnings) {
-          console.log(`  ⚠️  ${warning}`);
-        }
-      }
-      if (result.success) {
-        console.log('\n✅ Vault is ready for release');
-      } else {
-        console.log('\n❌ Vault is NOT ready for release');
-      }
-    });
-
-  commands
-    .command('claim-rewards-for-vault')
-    .requiredOption('--vault <string>', 'Vault address')
-    .requiredOption(
-      `--mode <string>`,
-      'simulate|multisig|execute - simulate - to print txn simulation and to get tx simulation link in explorer, execute - execute tx, multisig - to get bs58 tx for multisig usage'
-    )
-    .option(`--staging`, 'If true, will use the staging programs')
-    .option(`--devnet`, 'If true, will use devnet programs and RPC')
-    .option(`--user <string>`, 'User address')
-    .action(async ({ vault, mode, staging, devnet, user }) => {
-      const env = await initEnv(staging, undefined, undefined, undefined, devnet);
-      const vaultAddress = address(vault);
-      const kaminoVault = new KaminoVault(env.c.rpc, vaultAddress);
-      const kaminoManager = new KaminoManager(
-        env.c.rpc,
-        DEFAULT_RECENT_SLOT_DURATION_MS,
-        env.klendProgramId,
-        env.kvaultProgramId,
-        undefined,
-        env.farmsProgramId
-      );
-      const userWallet = user ? noopSigner(address(user)) : await env.getSigner();
-      const rewardsIxs = await kaminoManager.getClaimAllRewardsForVaultIxs(userWallet, kaminoVault);
-
-      if (rewardsIxs.length > 0) {
-        await processTx(
-          env.c,
-          userWallet,
-          [
-            ...rewardsIxs,
-            ...getPriorityFeeAndCuIxs({
-              priorityFeeMultiplier: 2500,
-              computeUnits: 400_000,
-            }),
-          ],
-          mode,
-          []
-        );
-      } else {
-        console.log('No rewards to claim');
-      }
-    });
-
   await commands.parseAsync();
 }
 
@@ -3095,6 +3114,52 @@ main()
     console.error('\n\nKamino manager CLI exited with error:\n\n', e);
     process.exit(1);
   });
+
+/** JSON for human-edited market configs: no deprecated/reserved/padding blobs (filled from chain in parse). */
+function lendingMarketToConfigFileJSON(market: LendingMarket): Record<string, unknown> {
+  const j = market.toJSON();
+  const { reserved0: _r0, reserved1: _r1, elevationGroupPadding: _egp, padding1: _p1, elevationGroups, name, ...top } = j;
+  return {
+    ...top,
+    name: parseZeroPaddedUtf8(name),
+    elevationGroups: elevationGroups.map(({ padding0: _p0, padding1: _gp1, ...g }) => g),
+  };
+}
+
+const LENDING_MARKET_FILE_IGNORE_TOP = new Set([
+  'reserved0',
+  'reserved1',
+  'elevationGroupPadding',
+  'padding1',
+  'elevationGroups',
+]);
+
+function parseLendingMarketConfigFromFile(fileObj: Record<string, unknown>, fallback: LendingMarket): LendingMarket {
+  const base = fallback.toJSON();
+  const merged = { ...base } as LendingMarketJSON;
+
+  const mergedMut = merged as unknown as Record<string, unknown>;
+  for (const [k, v] of Object.entries(fileObj)) {
+    if (LENDING_MARKET_FILE_IGNORE_TOP.has(k)) continue;
+    if (k === 'name' && typeof v === 'string') {
+      mergedMut[k] = renderZeroPaddedUtf8(v, 32);
+    } else {
+      mergedMut[k] = v;
+    }
+  }
+
+  if (fileObj.elevationGroups !== undefined && Array.isArray(fileObj.elevationGroups)) {
+    const fileEgs = fileObj.elevationGroups as Array<Record<string, unknown>>;
+    merged.elevationGroups = base.elevationGroups.map((baseEg, i) => {
+      const feg = fileEgs[i];
+      if (!feg || typeof feg !== 'object') return baseEg;
+      const { padding0: _p0, padding1: _fp1, ...semantic } = feg;
+      return { ...baseEg, ...semantic, padding0: baseEg.padding0, padding1: baseEg.padding1 };
+    });
+  }
+
+  return LendingMarket.fromJSON(merged);
+}
 
 function parseReserveConfigFromFile(reserveConfigFromFile: any): ReserveConfig {
   const reserveConfigFields: ReserveConfigFields = {
@@ -3155,7 +3220,7 @@ function parseReserveConfigFromFile(reserveConfigFromFile: any): ReserveConfig {
     borrowLimitAgainstThisCollateralInElevationGroup: parseReserveBorrowLimitAgainstCollInEmode(reserveConfigFromFile),
     deleveragingBonusIncreaseBpsPerDay: new BN(reserveConfigFromFile.deleveragingBonusIncreaseBpsPerDay),
     reserved1: Array(6).fill(0),
-    minDeleveragingBonusBps: 0,
+    minDeleveragingBonusBps: reserveConfigFromFile.minDeleveragingBonusBps,
     proposerAuthorityLocked: 0,
     blockCtokenUsage: 0,
     debtMaturityTimestamp: new BN(reserveConfigFromFile.debtMaturityTimestamp),
@@ -3233,7 +3298,6 @@ function parseReserveConfigToFile(reserveConfig: ReserveConfig) {
 
   return {
     status: reserveConfig.status,
-    paddingDeprecatedAssetTier: reserveConfig.paddingDeprecatedAssetTier,
     hostFixedInterestRateBps: reserveConfig.hostFixedInterestRateBps,
     minDeleveragingBonusBps: reserveConfig.minDeleveragingBonusBps,
     blockCtokenUsage: reserveConfig.blockCtokenUsage,
@@ -3248,7 +3312,6 @@ function parseReserveConfigToFile(reserveConfig: ReserveConfig) {
     fees: {
       borrowFee: new Fraction(reserveConfig.fees.originationFeeSf).toDecimal().toString(),
       flashLoanFee: new Fraction(reserveConfig.fees.flashLoanFeeSf).toDecimal().toString(),
-      padding: Array(8).fill(0),
     },
     depositLimit: reserveConfig.depositLimit.toString(),
     borrowLimit: reserveConfig.borrowLimit.toString(),
@@ -3267,7 +3330,9 @@ function parseReserveConfigToFile(reserveConfig: ReserveConfig) {
       pythConfiguration: reserveConfig.tokenInfo.pythConfiguration,
       blockPriceUsage: reserveConfig.tokenInfo.blockPriceUsage,
     },
-    borrowRateCurve: reserveConfig.borrowRateCurve,
+    borrowRateCurve: {
+      points: trimPoints(reserveConfig.borrowRateCurve.points),
+    },
     depositWithdrawalCap: reserveConfig.depositWithdrawalCap,
     debtWithdrawalCap: reserveConfig.debtWithdrawalCap,
     deleveragingMarginCallPeriodSecs: reserveConfig.deleveragingMarginCallPeriodSecs.toString(),
@@ -3284,7 +3349,6 @@ function parseReserveConfigToFile(reserveConfig: ReserveConfig) {
     deleveragingBonusIncreaseBpsPerDay: reserveConfig.deleveragingBonusIncreaseBpsPerDay.toString(),
     debtMaturityTimestamp: reserveConfig.debtMaturityTimestamp.toString(),
     debtTermSeconds: reserveConfig.debtTermSeconds.toString(),
-    reserved1: reserveConfig.reserved1,
   };
 }
 
