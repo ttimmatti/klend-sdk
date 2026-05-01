@@ -14,6 +14,8 @@ export const JUPSOL_MINT: Address = address('jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdo
 export const SOL_RESERVE: Address = address('d4A2prbA2whesmvHaL88BH6Ewn5N4bTSU2Ze8P6Bc4Q');
 export const JLP_RESERVE_JLP_MARKET: Address = address('DdTmCCjv7zHRD1hJv3E8bpnSEQBzdKkzB1j9ApXX5QoP');
 export const JLP_MINT: Address = address('27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4');
+export const SYRUP_USDC_MINT: Address = address('AvZZF1YaZDziPY2RCK4oJrRVrbN3mTD9NL24hPeaZeUj');
+export const SYRUP_USDC_MARKET: Address = address('6WEGfej9B9wjxRs6t4BYpb9iCXd8CpTpJ8fVSNzHCC5y');
 
 export const JUP_QUOTE_BUFFER_BPS = 1000;
 export const EXAMPLE_OBLIGATION: Address = address('4w1qUuYbXpwYkqWzuovJFvP3TRt9EgEzYQv7kYY1nM3J');

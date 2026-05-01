@@ -39,6 +39,7 @@
     "get-obligations-on-reserve-filter": "yarn tsx klend-examples/example_get_obligations_based_on_reserve_filter.ts",
     "change-market-admin": "yarn tsx klend-examples/example_change_market_admin.ts",
     "extra-farm-reward-apy": "yarn tsx klend-examples/example_extra_farm_reward_apy.ts",
+    "repay-with-coll-kswap": "yarn tsx klend-examples/example_repay_with_coll_transaction_kswap.ts",
     "kvault:create_vault": "yarn tsx kvault-examples/example_create_vault.ts",
     "kvault:get_user_info_in_vault": "yarn tsx kvault-examples/example_get_user_info_in_vault.ts",
     "kvault:get_user_pending_rewards_for_vault": "yarn tsx kvault-examples/example_get_user_pending_rewards_for_vault.ts",

@@ -1,4 +1,4 @@
-import { BN } from '@coral-xyz/anchor';
+import BN from 'bn.js';
 import {
   KaminoReserve,
   SwapInputs,
@@ -8,12 +8,12 @@ import {
   SwapQuoteProvider,
 } from '@kamino-finance/klend-sdk';
 import { KswapSdk, RouteOutput, RouteParams, RouterType } from '@kamino-finance/kswap-sdk';
+import { loadRouterContext } from '@kamino-finance/kswap-sdk/src/swap_api_utils/RouterContext';
 import Decimal from 'decimal.js';
 import { Address } from '@solana/kit';
-import { loadRouterContext } from '@kamino-finance/kswap-sdk/src/swap_api_utils/RouterContext';
 
 export const KSWAP_API = 'https://api.kamino.finance/kswap';
-const ALLOWED_ROUTERS: RouterType[] = ['dflow', 'jupiter', 'jupiterU', 'okx', 'jupiterLite'];
+const ALLOWED_ROUTERS: RouterType[] = ['dflow', 'metis', 'jupiterEuropa', 'okx', 'spur', 'lifi', 'titan'];
 
 export async function getTokenPriceFromJupWithFallback(
   kswapSdk: KswapSdk,
@@ -26,7 +26,7 @@ export async function getTokenPriceFromJupWithFallback(
   };
   const res = await kswapSdk.getJupiterPriceWithFallback(params);
 
-  return Number(res.data[inputMint]?.price || 0);
+  return Number(res.data[inputMint.toString()]?.price || 0);
 }
 
 export async function getTokenPriceFromBirdeye(
@@ -51,7 +51,7 @@ export function getKswapQuoter(
     klendAccounts: Array<Address>
   ): Promise<SwapQuote<RouteOutput>> => {
     const routeParams: RouteParams = {
-      executor: executor,
+      executor,
       tokenIn: inputs.inputMint,
       tokenOut: inputs.outputMint,
       amount: new BN(inputs.inputAmountLamports.toDP(0).toString()),
@@ -102,7 +102,8 @@ export function getKswapQuoter(
 export function getKswapSwapper(
   kswapSdk: KswapSdk,
   executor: Address,
-  slippageBps: number
+  slippageBps: number,
+  preferredMaxAccounts?: number
 ): SwapIxsProvider<RouteOutput> {
   const swapper: SwapIxsProvider<RouteOutput> = async (
     inputs: SwapInputs,
@@ -110,7 +111,7 @@ export function getKswapSwapper(
     quote: SwapQuote<RouteOutput>
   ): Promise<Array<SwapIxs<RouteOutput>>> => {
     const routeParams: RouteParams = {
-      executor: executor,
+      executor,
       tokenIn: inputs.inputMint,
       tokenOut: inputs.outputMint,
       amount: new BN(inputs.inputAmountLamports.toString()),
@@ -120,6 +121,7 @@ export function getKswapSwapper(
       routerTypes: ALLOWED_ROUTERS,
       includeRfq: false,
       includeLimoLogs: false,
+      preferredMaxAccounts,
     };
 
     const routerContext = await loadRouterContext(kswapSdk.connection, inputs.inputMint, inputs.outputMint);
@@ -131,6 +133,7 @@ export function getKswapSwapper(
         routeOutput.outputTokenDecimals!
       );
       const priceAInB = minAmountOut.div(inAmount);
+
       return {
         preActionIxs: [],
         swapIxs: routeOutput.instructions!.swapIxs!,
