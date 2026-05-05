@@ -136,7 +136,9 @@ import {
   WithdrawAndBlockReserveIxs,
   WithdrawIxs,
 } from './vault_types';
-import { batchFetch, collToLamportsDecimal, ZERO } from '@kamino-finance/kliquidity-sdk';
+import { batchFetch } from '@kamino-finance/kliquidity-sdk/dist/utils/batch';
+import { ZERO } from '@kamino-finance/kliquidity-sdk/dist/utils/math';
+import { collToLamportsDecimal } from '@kamino-finance/kliquidity-sdk/dist/utils/utils';
 import { FullBPSDecimal } from '@kamino-finance/kliquidity-sdk/dist/utils/CreationParameters';
 import {
   FarmConfigOption,
