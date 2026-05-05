@@ -56,7 +56,8 @@ export interface VaultStateFields {
   firstLossCapitalFarm: Address
   allowAllocationsInWhitelistedReservesOnly: number
   allowInvestInWhitelistedReservesOnly: number
-  padding4: Array<number>
+  padding2: Array<number>
+  rewardInfo: types.VaultRewardInfoFields
   padding3: Array<BN>
 }
 
@@ -101,7 +102,8 @@ export interface VaultStateJSON {
   firstLossCapitalFarm: string
   allowAllocationsInWhitelistedReservesOnly: number
   allowInvestInWhitelistedReservesOnly: number
-  padding4: Array<number>
+  padding2: Array<number>
+  rewardInfo: types.VaultRewardInfoJSON
   padding3: Array<string>
 }
 
@@ -146,7 +148,8 @@ export class VaultState {
   readonly firstLossCapitalFarm: Address
   readonly allowAllocationsInWhitelistedReservesOnly: number
   readonly allowInvestInWhitelistedReservesOnly: number
-  readonly padding4: Array<number>
+  readonly padding2: Array<number>
+  readonly rewardInfo: types.VaultRewardInfo
   readonly padding3: Array<BN>
 
   static readonly discriminator = Buffer.from([
@@ -194,8 +197,9 @@ export class VaultState {
     borshAddress("firstLossCapitalFarm"),
     borsh.u8("allowAllocationsInWhitelistedReservesOnly"),
     borsh.u8("allowInvestInWhitelistedReservesOnly"),
-    borsh.array(borsh.u8(), 14, "padding4"),
-    borsh.array(borsh.u128(), 238, "padding3"),
+    borsh.array(borsh.u8(), 14, "padding2"),
+    types.VaultRewardInfo.layout("rewardInfo"),
+    borsh.array(borsh.u128(), 232, "padding3"),
   ])
 
   constructor(fields: VaultStateFields) {
@@ -243,7 +247,8 @@ export class VaultState {
       fields.allowAllocationsInWhitelistedReservesOnly
     this.allowInvestInWhitelistedReservesOnly =
       fields.allowInvestInWhitelistedReservesOnly
-    this.padding4 = fields.padding4
+    this.padding2 = fields.padding2
+    this.rewardInfo = new types.VaultRewardInfo({ ...fields.rewardInfo })
     this.padding3 = fields.padding3
   }
 
@@ -341,7 +346,8 @@ export class VaultState {
         dec.allowAllocationsInWhitelistedReservesOnly,
       allowInvestInWhitelistedReservesOnly:
         dec.allowInvestInWhitelistedReservesOnly,
-      padding4: dec.padding4,
+      padding2: dec.padding2,
+      rewardInfo: types.VaultRewardInfo.fromDecoded(dec.rewardInfo),
       padding3: dec.padding3,
     })
   }
@@ -392,7 +398,8 @@ export class VaultState {
         this.allowAllocationsInWhitelistedReservesOnly,
       allowInvestInWhitelistedReservesOnly:
         this.allowInvestInWhitelistedReservesOnly,
-      padding4: this.padding4,
+      padding2: this.padding2,
+      rewardInfo: this.rewardInfo.toJSON(),
       padding3: this.padding3.map((item) => item.toString()),
     }
   }
@@ -443,7 +450,8 @@ export class VaultState {
         obj.allowAllocationsInWhitelistedReservesOnly,
       allowInvestInWhitelistedReservesOnly:
         obj.allowInvestInWhitelistedReservesOnly,
-      padding4: obj.padding4,
+      padding2: obj.padding2,
+      rewardInfo: types.VaultRewardInfo.fromJSON(obj.rewardInfo),
       padding3: obj.padding3.map((item) => new BN(item)),
     })
   }

@@ -1,6 +1,7 @@
 import { ReserveWhitelistEntry } from '../@codegen/kvault/accounts';
 import { VaultState } from '../@codegen/kvault/accounts/VaultState';
 import { VaultAllocation } from '../@codegen/kvault/types/VaultAllocation';
+import { VaultRewardInfo } from '../@codegen/kvault/types/VaultRewardInfo';
 
 export function decodeVaultState(data: Buffer): VaultState {
   if (!VaultState.discriminator.equals(data.slice(0, 8))) {
@@ -49,11 +50,12 @@ export function decodeVaultState(data: Buffer): VaultState {
     allocationAdmin: dec.allocationAdmin,
     withdrawalPenaltyLamports: dec.withdrawalPenaltyLamports,
     withdrawalPenaltyBps: dec.withdrawalPenaltyBps,
-    padding3: dec.padding3,
+    padding2: dec.padding2,
     firstLossCapitalFarm: dec.firstLossCapitalFarm,
     allowAllocationsInWhitelistedReservesOnly: dec.allowAllocationsInWhitelistedReservesOnly,
     allowInvestInWhitelistedReservesOnly: dec.allowInvestInWhitelistedReservesOnly,
-    padding4: dec.padding4,
+    rewardInfo: new VaultRewardInfo({ ...dec.rewardInfo }),
+    padding3: dec.padding3,
   });
 }
 

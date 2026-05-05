@@ -60,3 +60,12 @@ export type {
   AddUpdateWhitelistedReserveArgs,
   AddUpdateWhitelistedReserveAccounts,
 } from "./addUpdateWhitelistedReserve"
+export { topupRewards } from "./topupRewards"
+export type { TopupRewardsArgs, TopupRewardsAccounts } from "./topupRewards"
+export { withdrawRewards } from "./withdrawRewards"
+export type {
+  WithdrawRewardsArgs,
+  WithdrawRewardsAccounts,
+} from "./withdrawRewards"
+export { redeemInKind } from "./redeemInKind"
+export type { RedeemInKindArgs, RedeemInKindAccounts } from "./redeemInKind"

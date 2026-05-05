@@ -55,6 +55,12 @@ export type CustomError =
   | WithdrawalFeeLamportsGreaterThanMaxAllowed
   | ReserveNotWhitelisted
   | InvalidBoolLikeValue
+  | AUMDecreasedMoreThanExpected
+  | RewardTopupAmountZero
+  | RewardTopupAmountNotExpected
+  | RewardWithdrawAmountZero
+  | RewardWithdrawAmountNotExpected
+  | RewardsStaleForFeeUpdate
 
 export class DepositAmountsZero extends Error {
   static readonly code = 7000
@@ -678,6 +684,72 @@ export class InvalidBoolLikeValue extends Error {
   }
 }
 
+export class AUMDecreasedMoreThanExpected extends Error {
+  static readonly code = 7056
+  readonly code = 7056
+  readonly name = "AUMDecreasedMoreThanExpected"
+  readonly msg = "AUM decreased more than expected during redeem in kind"
+
+  constructor(readonly logs?: string[]) {
+    super("7056: AUM decreased more than expected during redeem in kind")
+  }
+}
+
+export class RewardTopupAmountZero extends Error {
+  static readonly code = 7057
+  readonly code = 7057
+  readonly name = "RewardTopupAmountZero"
+  readonly msg = "Reward topup amount is zero"
+
+  constructor(readonly logs?: string[]) {
+    super("7057: Reward topup amount is zero")
+  }
+}
+
+export class RewardTopupAmountNotExpected extends Error {
+  static readonly code = 7058
+  readonly code = 7058
+  readonly name = "RewardTopupAmountNotExpected"
+  readonly msg = "Reward topup is not as expected after transfer"
+
+  constructor(readonly logs?: string[]) {
+    super("7058: Reward topup is not as expected after transfer")
+  }
+}
+
+export class RewardWithdrawAmountZero extends Error {
+  static readonly code = 7059
+  readonly code = 7059
+  readonly name = "RewardWithdrawAmountZero"
+  readonly msg = "Reward withdraw amount is zero"
+
+  constructor(readonly logs?: string[]) {
+    super("7059: Reward withdraw amount is zero")
+  }
+}
+
+export class RewardWithdrawAmountNotExpected extends Error {
+  static readonly code = 7060
+  readonly code = 7060
+  readonly name = "RewardWithdrawAmountNotExpected"
+  readonly msg = "Reward withdraw is not as expected after transfer"
+
+  constructor(readonly logs?: string[]) {
+    super("7060: Reward withdraw is not as expected after transfer")
+  }
+}
+
+export class RewardsStaleForFeeUpdate extends Error {
+  static readonly code = 7061
+  readonly code = 7061
+  readonly name = "RewardsStaleForFeeUpdate"
+  readonly msg = "Rewards are stale - must be refreshed before updating fees"
+
+  constructor(readonly logs?: string[]) {
+    super("7061: Rewards are stale - must be refreshed before updating fees")
+  }
+}
+
 export function fromCode(code: number, logs?: string[]): CustomError | null {
   switch (code) {
     case 7000:
@@ -792,6 +864,18 @@ export function fromCode(code: number, logs?: string[]): CustomError | null {
       return new ReserveNotWhitelisted(logs)
     case 7055:
       return new InvalidBoolLikeValue(logs)
+    case 7056:
+      return new AUMDecreasedMoreThanExpected(logs)
+    case 7057:
+      return new RewardTopupAmountZero(logs)
+    case 7058:
+      return new RewardTopupAmountNotExpected(logs)
+    case 7059:
+      return new RewardWithdrawAmountZero(logs)
+    case 7060:
+      return new RewardWithdrawAmountNotExpected(logs)
+    case 7061:
+      return new RewardsStaleForFeeUpdate(logs)
   }
 
   return null

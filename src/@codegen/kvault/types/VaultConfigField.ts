@@ -441,6 +441,29 @@ export class AllowInvestInWhitelistedReservesOnly {
   }
 }
 
+export interface RewardPerSecondJSON {
+  kind: "RewardPerSecond"
+}
+
+export class RewardPerSecond {
+  static readonly discriminator = 19
+  static readonly kind = "RewardPerSecond"
+  readonly discriminator = 19
+  readonly kind = "RewardPerSecond"
+
+  toJSON(): RewardPerSecondJSON {
+    return {
+      kind: "RewardPerSecond",
+    }
+  }
+
+  toEncodable() {
+    return {
+      RewardPerSecond: {},
+    }
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function fromDecoded(obj: any): types.VaultConfigFieldKind {
   if (typeof obj !== "object") {
@@ -503,6 +526,9 @@ export function fromDecoded(obj: any): types.VaultConfigFieldKind {
   }
   if ("AllowInvestInWhitelistedReservesOnly" in obj) {
     return new AllowInvestInWhitelistedReservesOnly()
+  }
+  if ("RewardPerSecond" in obj) {
+    return new RewardPerSecond()
   }
 
   throw new Error("Invalid enum object")
@@ -569,6 +595,9 @@ export function fromJSON(
     case "AllowInvestInWhitelistedReservesOnly": {
       return new AllowInvestInWhitelistedReservesOnly()
     }
+    case "RewardPerSecond": {
+      return new RewardPerSecond()
+    }
   }
 }
 
@@ -593,6 +622,7 @@ export function layout(property?: string) {
     borsh.struct([], "FirstLossCapitalFarm"),
     borsh.struct([], "AllowAllocationsInWhitelistedReservesOnly"),
     borsh.struct([], "AllowInvestInWhitelistedReservesOnly"),
+    borsh.struct([], "RewardPerSecond"),
   ])
   if (property !== undefined) {
     return ret.replicate(property)

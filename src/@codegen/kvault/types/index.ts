@@ -82,6 +82,7 @@ export type VaultConfigFieldKind =
   | VaultConfigField.FirstLossCapitalFarm
   | VaultConfigField.AllowAllocationsInWhitelistedReservesOnly
   | VaultConfigField.AllowInvestInWhitelistedReservesOnly
+  | VaultConfigField.RewardPerSecond
 export type VaultConfigFieldJSON =
   | VaultConfigField.PerformanceFeeBpsJSON
   | VaultConfigField.ManagementFeeBpsJSON
@@ -102,12 +103,18 @@ export type VaultConfigFieldJSON =
   | VaultConfigField.FirstLossCapitalFarmJSON
   | VaultConfigField.AllowAllocationsInWhitelistedReservesOnlyJSON
   | VaultConfigField.AllowInvestInWhitelistedReservesOnlyJSON
+  | VaultConfigField.RewardPerSecondJSON
 
 export { VaultAllocation } from "./VaultAllocation"
 export type {
   VaultAllocationFields,
   VaultAllocationJSON,
 } from "./VaultAllocation"
+export { VaultRewardInfo } from "./VaultRewardInfo"
+export type {
+  VaultRewardInfoFields,
+  VaultRewardInfoJSON,
+} from "./VaultRewardInfo"
 export { UpdateGlobalConfigMode }
 
 export type UpdateKVaultGlobalConfigModeKind =
