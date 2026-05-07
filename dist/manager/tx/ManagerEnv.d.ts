@@ -1,0 +1,39 @@
+import { Address, TransactionSigner } from '@solana/kit';
+import { ManagerConnectionPool } from './ManagerConnectionPool';
+import { KaminoMarket } from '../../classes';
+import { VaultState } from '../../@codegen/kvault/accounts';
+export type Cluster = 'localnet' | 'devnet' | 'mainnet-beta';
+export type SendTxMode = 'execute' | 'simulate' | 'multisig' | 'print';
+export type SignerConfig = {
+    multisigSigner?: TransactionSigner;
+    admin?: TransactionSigner;
+};
+export type ProgramConfig = {
+    staging?: boolean;
+    devnet?: boolean;
+    klendProgramId?: Address;
+    kvaultProgramId?: Address;
+    farmsProgramId?: Address;
+    farmsGlobalConfig?: Address;
+};
+interface GetSignerProps {
+    market?: KaminoMarket;
+    useLendingMarketOwnerCached?: boolean;
+    vaultState?: VaultState;
+    useVaultPendingAdmin?: boolean;
+    useVaultAllocationAdmin?: boolean;
+}
+export declare class ManagerEnv {
+    c: ManagerConnectionPool;
+    cluster: Cluster;
+    signerConfig: SignerConfig;
+    klendProgramId: Address;
+    kvaultProgramId: Address;
+    farmsProgramId: Address;
+    farmsGlobalConfig: Address;
+    constructor(c: ManagerConnectionPool, cluster: Cluster, signerConfig: SignerConfig, klendProgramId: Address, kvaultProgramId: Address, farmsProgramId: Address, farmsGlobalConfig: Address);
+    getSigner({ market, useLendingMarketOwnerCached, vaultState, useVaultPendingAdmin, useVaultAllocationAdmin, }?: GetSignerProps): Promise<TransactionSigner>;
+}
+export declare function initEnv(staging?: boolean, multisig?: Address | undefined, adminKeypairPath?: string | undefined, rpcUrl?: string | undefined, devnet?: boolean): Promise<ManagerEnv>;
+export {};
+//# sourceMappingURL=ManagerEnv.d.ts.map

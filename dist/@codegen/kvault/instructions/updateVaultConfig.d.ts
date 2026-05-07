@@ -1,0 +1,16 @@
+import { Address, AccountMeta, AccountSignerMeta, Instruction, TransactionSigner } from "@solana/kit";
+import * as types from "../types";
+export declare const DISCRIMINATOR: Buffer<ArrayBuffer>;
+export interface UpdateVaultConfigArgs {
+    entry: types.VaultConfigFieldKind;
+    data: Uint8Array;
+}
+export interface UpdateVaultConfigAccounts {
+    signer: TransactionSigner;
+    globalConfig: Address;
+    vaultState: Address;
+    klendProgram: Address;
+}
+export declare const layout: import("buffer-layout").Layout<unknown>;
+export declare function updateVaultConfig(args: UpdateVaultConfigArgs, accounts: UpdateVaultConfigAccounts, remainingAccounts?: Array<AccountMeta | AccountSignerMeta>, programAddress?: Address): Instruction<string, readonly (AccountMeta<string> | import("@solana/kit").AccountLookupMeta<string, string>)[]>;
+//# sourceMappingURL=updateVaultConfig.d.ts.map

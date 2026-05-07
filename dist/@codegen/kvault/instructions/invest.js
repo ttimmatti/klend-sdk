@@ -1,0 +1,36 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.DISCRIMINATOR = void 0;
+exports.invest = invest;
+/* eslint-disable @typescript-eslint/no-unused-vars */
+const kit_1 = require("@solana/kit");
+const programId_1 = require("../programId");
+exports.DISCRIMINATOR = Buffer.from([13, 245, 180, 103, 254, 182, 121, 4]);
+function invest(accounts, remainingAccounts = [], programAddress = programId_1.PROGRAM_ID) {
+    const keys = [
+        { address: accounts.payer.address, role: 3, signer: accounts.payer },
+        { address: accounts.payerTokenAccount, role: 1 },
+        { address: accounts.vaultState, role: 1 },
+        { address: accounts.tokenVault, role: 1 },
+        { address: accounts.tokenMint, role: 1 },
+        { address: accounts.baseVaultAuthority, role: 1 },
+        { address: accounts.ctokenVault, role: 1 },
+        { address: accounts.reserve, role: 1 },
+        { address: accounts.lendingMarket, role: 0 },
+        { address: accounts.lendingMarketAuthority, role: 0 },
+        { address: accounts.reserveLiquiditySupply, role: 1 },
+        { address: accounts.reserveCollateralMint, role: 1 },
+        (0, kit_1.isSome)(accounts.reserveWhitelistEntry)
+            ? { address: accounts.reserveWhitelistEntry.value, role: 0 }
+            : { address: programAddress, role: 0 },
+        { address: accounts.klendProgram, role: 0 },
+        { address: accounts.reserveCollateralTokenProgram, role: 0 },
+        { address: accounts.tokenProgram, role: 0 },
+        { address: accounts.instructionSysvarAccount, role: 0 },
+        ...remainingAccounts,
+    ];
+    const data = exports.DISCRIMINATOR;
+    const ix = { accounts: keys, programAddress, data };
+    return ix;
+}
+//# sourceMappingURL=invest.js.map
