@@ -8,6 +8,7 @@ keys/localnet/owner.json
 configs/**/*.json
 .yalc
 yalc.lock
+.yarn/install-state.gz
 
 # Only allow reserve_config_example.json in configs/ folder, but ignore all others
 !configs/reserve_config_example.json

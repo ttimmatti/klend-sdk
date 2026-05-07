@@ -1,5 +1,5 @@
 {
-  "name": "@kamino-finance/klend-sdk",
+  "name": "@m-daeva/klend-sdk",
   "version": "7.3.22",
   "description": "Typescript SDK for interacting with the Kamino Lending (klend) protocol",
   "repository": {
