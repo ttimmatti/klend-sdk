@@ -28,6 +28,7 @@
   "license": "MIT",
   "scripts": {
     "docs": "typedoc",
+    "prepare": "yarn build",
     "build": "rm -rf dist/; tsc",
     "build:watch": "yarn tsc --watch",
     "test-v2": "USE_V2=true yarn test",
