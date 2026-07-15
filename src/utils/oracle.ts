@@ -21,7 +21,7 @@ export const MAX_CONFIDENCE_PERCENTAGE: Decimal = new Decimal('2');
 export const CONFIDENCE_FACTOR: Decimal = new Decimal('100').div(MAX_CONFIDENCE_PERCENTAGE);
 
 const getScopeAddress = () => {
-  return address('3Vw8Ngkh1MVJTPHthmUbmU2XKtFEkjYvJzMqrv2rh9yX');
+  return address('ys2EUaGY7adhuuudg8YP5VhGusgxSZ7i5GxcsTHjg1c');
 };
 
 export type TokenOracleData = {

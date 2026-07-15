@@ -27,7 +27,7 @@ exports.MAX_CONFIDENCE_PERCENTAGE = new decimal_js_1.default('2');
 /// Confidence factor is used to scale the confidence value to a value that can be compared to the price.
 exports.CONFIDENCE_FACTOR = new decimal_js_1.default('100').div(exports.MAX_CONFIDENCE_PERCENTAGE);
 const getScopeAddress = () => {
-    return (0, kit_1.address)('3Vw8Ngkh1MVJTPHthmUbmU2XKtFEkjYvJzMqrv2rh9yX');
+    return (0, kit_1.address)('ys2EUaGY7adhuuudg8YP5VhGusgxSZ7i5GxcsTHjg1c');
 };
 function getTokenOracleDataSync(allOracleAccounts, reserves) {
     const tokenOracleDataForReserves = [];
